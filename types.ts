@@ -13,7 +13,7 @@ export interface Guest {
   checkInTime?: string;
 }
 
-export type ViewState = 'HOME' | 'RSVP' | 'TICKET' | 'ADMIN' | 'SCANNER';
+export type ViewState = 'HOME' | 'RSVP' | 'TICKET' | 'ADMIN' | 'SCANNER' | 'CATEGORIES';
 
 export interface EventStats {
   totalRSVPs: number;

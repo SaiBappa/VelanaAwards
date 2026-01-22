@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { Guest, ViewState } from './types';
-import { EVENT_DETAILS, STORAGE_KEY } from './constants';
+import { EVENT_DETAILS, STORAGE_KEY, AWARD_SECTIONS } from './constants';
 import RSVPForm from './components/RSVPForm';
 import TicketView from './components/TicketView';
 import AdminDashboard from './components/AdminDashboard';
 import QRScanner from './components/QRScanner';
-import { Calendar, UserCheck, ShieldCheck, Home, ArrowRight, Menu, X, Sparkles, Plane, MapPin } from 'lucide-react';
+import { Calendar, UserCheck, ShieldCheck, Home, ArrowRight, Menu, X, Sparkles, Plane, MapPin, Award, Box, Coffee, Trophy, ExternalLink } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('HOME');
@@ -105,6 +105,7 @@ const App: React.FC = () => {
 
           <div className="hidden md:flex items-center gap-2">
             <NavItem target="HOME" icon={Home} label="Home" />
+            <NavItem target="CATEGORIES" icon={Award} label="Awards" />
             <NavItem target="RSVP" icon={Calendar} label="RSVP" />
             <NavItem target="ADMIN" icon={ShieldCheck} label="Admin" />
           </div>
@@ -130,6 +131,7 @@ const App: React.FC = () => {
         {isMenuOpen && (
           <div className="md:hidden absolute top-full left-0 w-full bg-zinc-900 border-b border-zinc-800 py-4 animate-in slide-in-from-top duration-300">
             <NavItem target="HOME" icon={Home} label="Home" />
+            <NavItem target="CATEGORIES" icon={Award} label="Awards" />
             <NavItem target="RSVP" icon={Calendar} label="RSVP" />
             <NavItem target="ADMIN" icon={ShieldCheck} label="Admin" />
           </div>
@@ -158,9 +160,15 @@ const App: React.FC = () => {
                 >
                   Confirm Your Attendance <ArrowRight size={20} />
                 </button>
-                <div className="flex items-center gap-2 text-sm text-zinc-500 font-medium">
-                  <MapPin size={16} /> {EVENT_DETAILS.location}
-                </div>
+                <button 
+                  onClick={() => setView('CATEGORIES')}
+                  className="w-full sm:w-auto px-8 py-4 bg-zinc-800 text-white font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors"
+                >
+                  View Categories
+                </button>
+              </div>
+              <div className="flex items-center justify-center gap-2 text-sm text-zinc-500 font-medium pt-2">
+                 <MapPin size={16} /> {EVENT_DETAILS.location}
               </div>
             </section>
 
@@ -194,21 +202,117 @@ const App: React.FC = () => {
                </div>
             </section>
 
-            {/* Event Countdown or Preview image would go here */}
-            <div className="w-full aspect-[21/9] rounded-[40px] overflow-hidden relative group">
-               <img src="https://picsum.photos/1200/600?grayscale" alt="Event Venue" className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform duration-1000" />
-               <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
-               <div className="absolute bottom-8 left-8 right-8 flex justify-between items-end">
-                  <div className="space-y-1">
-                    <p className="text-zinc-400 text-xs font-bold uppercase tracking-widest">Upcoming Venue</p>
-                    <h4 className="serif text-3xl font-bold">{EVENT_DETAILS.location}</h4>
+            {/* Venue Card */}
+            <div className="w-full min-h-[400px] md:aspect-[21/9] rounded-[40px] overflow-hidden relative group bg-zinc-900 border border-zinc-800 shadow-2xl isolate">
+               {/* Background Image - Using a bright, high-quality Maldives resort image */}
+               <img 
+                 src="https://images.unsplash.com/photo-1540206351-d6465b3ac5c1?q=80&w=2832&auto=format&fit=crop" 
+                 alt="Crossroads Maldives Venue" 
+                 className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-1000" 
+               />
+               
+               {/* Gradient Overlays for text readability */}
+               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+               <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-transparent to-transparent md:via-black/20"></div>
+
+               <div className="absolute bottom-0 left-0 right-0 p-8 md:p-12 flex flex-col md:flex-row justify-between items-end gap-8">
+                  <div className="space-y-4 max-w-2xl relative z-10">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-yellow-500 text-xs font-bold uppercase tracking-widest flex items-center gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-yellow-500/20">
+                          <MapPin size={12} /> Official Venue
+                        </span>
+                        <a 
+                          href="https://www.google.com/maps/search/Crossroads+Maldives" 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="text-zinc-300 text-xs font-bold uppercase tracking-widest flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/20 transition-colors"
+                        >
+                          View on Map <ExternalLink size={12} />
+                        </a>
+                    </div>
+                    
+                    <div>
+                        <h4 className="serif text-4xl md:text-6xl font-bold text-white leading-tight mb-2 drop-shadow-lg">
+                        {EVENT_DETAILS.location}
+                        </h4>
+                        <p className="text-zinc-200 text-base md:text-lg max-w-lg font-light leading-relaxed drop-shadow-md">
+                        The Maldives' first extraordinary multi-island leisure destination. Join us for a night of celebration under the stars.
+                        </p>
+                    </div>
+
+                    <div className="flex items-center gap-4 pt-2">
+                        <div className="flex items-center gap-3 text-sm text-zinc-100 border-l-2 border-yellow-500 pl-4 bg-black/30 p-2 rounded-r-lg backdrop-blur-sm">
+                            <span className="font-medium">{EVENT_DETAILS.subLocation}</span>
+                        </div>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-yellow-500 text-4xl font-bold serif leading-none">12.02</p>
-                    <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">February 2026</p>
+                  
+                  {/* Date/Time Badge */}
+                  <div className="text-left md:text-right bg-zinc-900/80 backdrop-blur-xl p-6 rounded-2xl border border-white/10 min-w-[160px] shadow-2xl relative z-10">
+                    <div className="flex flex-row md:flex-col items-baseline md:items-end gap-2 md:gap-0">
+                       <p className="text-yellow-500 text-5xl md:text-6xl font-bold serif leading-none">12</p>
+                       <p className="text-white text-xl md:text-2xl font-medium">Feb '26</p>
+                    </div>
+                    <div className="mt-3 space-y-1 text-right">
+                       <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest">Thursday</p>
+                       <p className="text-white text-xs font-bold uppercase tracking-widest bg-yellow-600/20 text-yellow-500 px-2 py-1 rounded inline-block">19:15 HRS</p>
+                    </div>
                   </div>
                </div>
             </div>
+          </div>
+        )}
+
+        {view === 'CATEGORIES' && (
+          <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4">
+             <header className="text-center space-y-4 py-8">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-bold text-zinc-400 uppercase tracking-widest">
+                  <Trophy size={14} className="text-yellow-500" /> Honors & Recognition
+                </div>
+                <h2 className="serif text-4xl md:text-5xl font-bold">Award Categories</h2>
+                <p className="text-zinc-400 max-w-2xl mx-auto">
+                  Recognizing the outstanding contributions of our partners in enhancing connectivity and services at Velana International Airport.
+                </p>
+             </header>
+
+             <div className="grid grid-cols-1 gap-8">
+                {AWARD_SECTIONS.map((section, idx) => (
+                   <div key={idx} className="bg-zinc-900/40 rounded-3xl border border-zinc-800 overflow-hidden relative group">
+                      <div className="absolute inset-0 bg-gradient-to-r from-zinc-900 via-zinc-900/95 to-transparent z-10"></div>
+                      <div className="relative z-20 p-8 md:p-12 flex flex-col md:flex-row gap-12">
+                         <div className="flex-shrink-0 space-y-4 md:w-1/3">
+                            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-yellow-500/20 to-yellow-600/5 border border-yellow-500/30 flex items-center justify-center text-yellow-500">
+                               {section.id === 'passenger' && <Plane size={32} strokeWidth={1.5} />}
+                               {section.id === 'cargo' && <Box size={32} strokeWidth={1.5} />}
+                               {section.id === 'lounge' && <Coffee size={32} strokeWidth={1.5} />}
+                            </div>
+                            <div>
+                               <h3 className="serif text-3xl font-bold text-white mb-2">{section.title}</h3>
+                               <p className="text-zinc-400 text-sm leading-relaxed">{section.description}</p>
+                            </div>
+                         </div>
+                         
+                         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {section.categories.map((cat, i) => (
+                               <div key={i} className="flex items-start gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:border-yellow-500/30 transition-colors">
+                                  <div className="mt-1 w-2 h-2 rounded-full bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.6)]"></div>
+                                  <span className="text-zinc-200 font-medium">{cat}</span>
+                               </div>
+                            ))}
+                         </div>
+                      </div>
+                   </div>
+                ))}
+             </div>
+             
+             <div className="text-center pt-8">
+                <button 
+                  onClick={() => setView('RSVP')}
+                  className="inline-flex items-center gap-2 text-yellow-500 hover:text-yellow-400 transition-colors font-bold uppercase tracking-widest text-sm"
+                >
+                  Join the Celebration <ArrowRight size={16} />
+                </button>
+             </div>
           </div>
         )}
 
