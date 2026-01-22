@@ -1,0 +1,7 @@
+{
+  "name": "Velana Awards",
+  "description": "A comprehensive guest management system for the Velana Awards, featuring QR code ticketing, real-time scanning, and an AI-powered admin dashboard.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
