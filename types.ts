@@ -11,12 +11,29 @@ export interface Guest {
   rsvpDate: string;
   checkedIn: boolean;
   checkInTime?: string;
+  invitationSent?: boolean;
+  invitationSentAt?: string;
 }
 
-export type ViewState = 'HOME' | 'RSVP' | 'TICKET' | 'ADMIN' | 'SCANNER' | 'CATEGORIES';
+export type ViewState = 'HOME' | 'TICKET' | 'ADMIN' | 'SCANNER' | 'CATEGORIES' | 'LOGIN';
 
 export interface EventStats {
   totalRSVPs: number;
   totalCheckedIn: number;
   awardRecipientsCount: number;
+}
+
+export interface EmailTemplate {
+  subject: string;
+  imageUrl: string;
+  body: string;
+}
+
+export interface BirdConfig {
+  apiKey: string;
+  workspaceId: string;
+  // Email Settings
+  emailChannelId: string;
+  emailFromName: string;
+  emailFromAddress: string;
 }

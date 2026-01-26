@@ -17,7 +17,8 @@
     "html5-qrcode": "^2.3.8",
     "react-dom": "^19.2.3",
     "html-to-image": "^1.11.11",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@supabase/supabase-js": "2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -74,3 +74,13 @@ export const AWARD_SECTIONS = [
 ];
 
 export const STORAGE_KEY = 'velana_guests_v2';
+
+export const DEFAULT_GUEST_CATEGORIES = [
+  "Not an Award Recipient", 
+  "Nominee / Partner", 
+  "VIP", 
+  "Media", 
+  "Organizing Team", 
+  "Government Official", 
+  "Sponsor"
+];

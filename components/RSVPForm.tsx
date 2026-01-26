@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 import { Guest } from '../types';
 import { NOMINEE_ORGANIZATIONS } from '../constants';
 import { sendGuestConfirmationEmail } from '../services/emailService';
-import { User, Mail, Building, Briefcase, Phone, Loader2 } from 'lucide-react';
+import { createGuest } from '../services/dataService';
+import { User, Mail, Building, Briefcase, Phone, Loader2, AlertCircle } from 'lucide-react';
 
 interface RSVPFormProps {
   onSuccess: (guest: Guest) => void;
@@ -13,6 +14,7 @@ const COUNTRY_CODES = ["+960", "+1", "+44", "+971", "+65", "+91", "+60", "+94"];
 
 const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -25,26 +27,37 @@ const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setError(null);
 
-    // Auto-categorize based on Organization name
-    const isNominee = NOMINEE_ORGANIZATIONS.some(org => 
-      formData.organization.toLowerCase().includes(org.toLowerCase()) || 
-      org.toLowerCase().includes(formData.organization.toLowerCase())
-    );
+    try {
+      // Auto-categorize based on Organization name
+      const isNominee = NOMINEE_ORGANIZATIONS.some(org => 
+        formData.organization.toLowerCase().includes(org.toLowerCase()) || 
+        org.toLowerCase().includes(formData.organization.toLowerCase())
+      );
 
-    const newGuest: Guest = {
-      ...formData,
-      id: Math.random().toString(36).substr(2, 9).toUpperCase(),
-      awardCategory: isNominee ? "Nominee / Partner" : "Not an Award Recipient",
-      rsvpDate: new Date().toISOString(),
-      checkedIn: false
-    };
+      const newGuest: Guest = {
+        ...formData,
+        id: Math.random().toString(36).substr(2, 9).toUpperCase(),
+        awardCategory: isNominee ? "Nominee / Partner" : "Not an Award Recipient",
+        rsvpDate: new Date().toISOString(),
+        checkedIn: false
+      };
 
-    // Trigger Email Service
-    await sendGuestConfirmationEmail(newGuest);
+      // 1. Create in Database
+      await createGuest(newGuest);
 
-    setIsSubmitting(false);
-    onSuccess(newGuest);
+      // 2. Trigger Email Service (Async, don't block UI if it's slow)
+      sendGuestConfirmationEmail(newGuest).catch(console.error);
+
+      // 3. Success
+      onSuccess(newGuest);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to register. Please try again later.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -132,6 +145,12 @@ const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
             onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
           />
         </div>
+
+        {error && (
+          <div className="bg-red-900/20 border border-red-900/50 p-4 rounded-lg flex items-center gap-2 text-red-500 text-sm">
+            <AlertCircle size={16} /> {error}
+          </div>
+        )}
 
         <button
           type="submit"
