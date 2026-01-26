@@ -12,6 +12,17 @@ interface RSVPFormProps {
 
 const COUNTRY_CODES = ["+960", "+1", "+44", "+971", "+65", "+91", "+60", "+94"];
 
+// Robust ID Generator (UUID compatible)
+const generateId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+};
+
 const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +49,7 @@ const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
 
       const newGuest: Guest = {
         ...formData,
-        id: Math.random().toString(36).substr(2, 9).toUpperCase(),
+        id: generateId(),
         awardCategory: isNominee ? "Nominee / Partner" : "Not an Award Recipient",
         rsvpDate: new Date().toISOString(),
         checkedIn: false
@@ -52,9 +63,9 @@ const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
 
       // 3. Success
       onSuccess(newGuest);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Failed to register. Please try again later.");
+      setError("Failed to register. Please try again later. " + (err.message || ""));
     } finally {
       setIsSubmitting(false);
     }

@@ -7,7 +7,7 @@ import { createGuest, bulkCreateGuests, updateGuestInvitationStatus } from '../s
 import { sendInvitationEmail, sendGuestConfirmationEmail } from '../services/emailService';
 import { signInWithMicrosoft, getActiveAccount, logoutMicrosoft, getGraphAccessToken, sendEmailViaGraph } from '../services/msGraphService';
 import { supabase } from '../services/supabaseClient';
-import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle } from 'lucide-react';
+import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle, HelpCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import * as XLSX from 'xlsx';
 import TicketView from './TicketView';
@@ -18,6 +18,17 @@ interface AdminDashboardProps {
 }
 
 const COUNTRY_CODES = ["+960", "+1", "+44", "+971", "+65", "+91", "+60", "+94"];
+
+// Robust ID Generator (UUID compatible)
+const generateId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+};
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, onDeleteGuest }) => {
   const [guests, setGuests] = useState<Guest[]>(initialGuests);
@@ -117,7 +128,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   // Auto-dismiss notification
   useEffect(() => {
     if (notification) {
-      const timer = setTimeout(() => setNotification(null), 6000); // Increased timeout for reading errors
+      // Longer timeout for errors so user can read them
+      const timeout = notification.type === 'error' ? 8000 : 4000;
+      const timer = setTimeout(() => setNotification(null), timeout);
       return () => clearTimeout(timer);
     }
   }, [notification]);
@@ -148,8 +161,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
         saveMsConfig();
     } catch (e: any) {
         console.error(e);
-        // Show the actual error message from MSAL
-        setNotification({ type: 'error', message: `Connection failed: ${e.message || "Unknown error"}` });
+        let errorMsg = e.message || "Unknown error";
+        
+        // Detect specific SPA configuration error
+        if (errorMsg.includes("AADSTS9002326") || errorMsg.includes("Cross-origin")) {
+            errorMsg = "Azure Config Error: Please switch your App Platform from 'Web' to 'Single-Page Application' in Azure Portal.";
+        }
+        
+        setNotification({ type: 'error', message: errorMsg });
     }
   };
 
@@ -329,7 +348,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
 
         // Map Excel data to Guest type
         const mappedData: Guest[] = data.map((row: any) => ({
-          id: Math.random().toString(36).substr(2, 9).toUpperCase(),
+          id: generateId(),
           name: row['Name'] || row['name'] || 'Unknown',
           email: row['Email'] || row['email'] || '',
           organization: row['Organization'] || row['organization'] || '',
@@ -362,8 +381,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
       setShowImportModal(false);
       setParsedGuests([]);
       setImportFile(null);
-    } catch (err) {
-      setNotification({ type: 'error', message: "Failed to save guests to database." });
+    } catch (err: any) {
+      setNotification({ type: 'error', message: "Failed to save guests: " + (err.message || "Unknown DB Error") });
     } finally {
       setIsProcessing(false);
     }
@@ -375,7 +394,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     try {
       const newGuest: Guest = {
         ...manualForm,
-        id: Math.random().toString(36).substr(2, 9).toUpperCase(),
+        id: generateId(),
         rsvpDate: new Date().toISOString(),
         checkedIn: false,
         invitationSent: false,
@@ -393,8 +412,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
       });
       setNotification({ type: 'success', message: "Guest added successfully" });
       setShowImportModal(false);
-    } catch (err) {
-      setNotification({ type: 'error', message: "Failed to add guest." });
+    } catch (err: any) {
+      console.error(err);
+      setNotification({ type: 'error', message: "Failed to add guest: " + (err.message || err.error_description || "Database error") });
     } finally {
       setIsProcessing(false);
     }
@@ -642,8 +662,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                           <p className="text-xs text-zinc-400">
                              Send invitations directly from your Outlook/Office 365 account. Requires an App Registration in Azure AD with <code>Mail.Send</code> permissions.
                           </p>
+                          <div className="bg-blue-900/20 border border-blue-900/40 p-4 rounded-lg">
+                            <h5 className="text-xs font-bold text-blue-400 flex items-center gap-2 mb-2">
+                              <HelpCircle size={14} /> Setup Instructions
+                            </h5>
+                            <ol className="text-[11px] text-zinc-300 list-decimal pl-4 space-y-1">
+                                <li>Go to <strong>Azure Portal</strong> {'>'} <strong>App Registrations</strong> {'>'} Select your App.</li>
+                                <li>Click <strong>Authentication</strong> in the left menu.</li>
+                                <li>If you see "Web", delete it or add a new platform.</li>
+                                <li>Click <strong>Add a platform</strong> and select <strong>Single-page application</strong>.</li>
+                                <li>Add this exact Redirect URI: <code className="bg-black/30 px-1 rounded select-all">{window.location.origin}</code></li>
+                                <li>Save changes and try connecting again.</li>
+                            </ol>
+                          </div>
+                          
                           <div className="text-xs bg-black/30 p-3 rounded border border-zinc-700 font-mono text-zinc-500">
-                              Redirect URI: {window.location.origin}
+                              Current Redirect URI: <span className="text-white select-all">{window.location.origin}</span>
                           </div>
                           
                           <div>
@@ -1077,7 +1111,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
       {notification && (
         <div className={`fixed bottom-6 right-6 px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300 ${notification.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
           {notification.type === 'success' ? <CheckCircle size={24} /> : <AlertCircle size={24} />}
-          <span className="font-bold">{notification.message}</span>
+          <span className="font-bold text-sm max-w-xs">{notification.message}</span>
         </div>
       )}
     </div>
