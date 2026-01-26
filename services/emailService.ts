@@ -1,127 +1,80 @@
 
-import { Guest, EmailTemplate, BirdConfig } from "../types";
+import { Guest, EmailTemplate, MicrosoftConfig } from "../types";
+import { getGraphAccessToken, sendEmailViaGraph } from "./msGraphService";
 
-const BIRD_API_BASE = "https://api.bird.com";
-
-// Helper to get config from local storage if not provided (for RSVP form usage)
-const getStoredConfig = (): BirdConfig | null => {
-  const saved = localStorage.getItem('velana_bird_config');
-  return saved ? JSON.parse(saved) : null;
-};
-
-const sendBirdEmail = async (
-  toEmail: string, 
-  subject: string, 
-  htmlBody: string, 
-  textBody: string,
-  config?: BirdConfig
-): Promise<void> => {
-  const finalConfig = config || getStoredConfig();
-
-  if (!finalConfig || !finalConfig.apiKey || !finalConfig.workspaceId || !finalConfig.emailChannelId) {
-    console.warn("Bird Email Configuration missing. Falling back to console log.");
-    console.log(`[Mock Email] To: ${toEmail}, Subject: ${subject}`);
-    return;
-  }
-
-  const url = `${BIRD_API_BASE}/workspaces/${finalConfig.workspaceId}/channels/${finalConfig.emailChannelId}/messages`;
-
-  const payload = {
-    receiver: {
-      contacts: [
-        {
-          identifierValue: toEmail,
-          identifierKey: "emailaddress"
-        }
-      ]
-    },
-    body: {
-      type: "html",
-      html: {
-        html: htmlBody,
-        text: textBody
-      }
-    },
-    subject: subject,
-    sender: {
-        name: finalConfig.emailFromName || "Velana Awards",
-        address: finalConfig.emailFromAddress // Optional, depends on channel config
-    }
-  };
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `AccessKey ${finalConfig.apiKey}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      console.error("Bird Email API Error:", errData);
-      throw new Error(`Email API failed: ${response.status} ${response.statusText}`);
-    }
-
-    console.log(`Email sent successfully via Bird to ${toEmail}`);
-  } catch (error) {
-    console.error("Failed to send email via Bird:", error);
-    throw error;
-  }
-};
-
-export const sendGuestConfirmationEmail = async (guest: Guest, config?: BirdConfig): Promise<boolean> => {
-  const subject = `Your Digital Pass - Velana Awards 2026`;
-  const passLink = `${window.location.origin}?guestId=${guest.id}`;
-  
-  const textBody = `Dear ${guest.name},\n\nThank you for confirming your attendance.\n\nYour Guest ID is: ${guest.id}\n\nView your digital pass here: ${passLink}\n\nSee you at the event!`;
-  
-  const htmlBody = `
-    <div style="font-family: sans-serif; color: #333;">
-      <h2>Velana Awards 2026</h2>
-      <p>Dear ${guest.name},</p>
-      <p>Thank you for confirming your attendance. We are excited to welcome you.</p>
-      <div style="background: #f4f4f5; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
-         <p style="font-size: 12px; text-transform: uppercase; color: #666;">Guest ID</p>
-         <h1 style="margin: 5px 0; color: #d4af37;">${guest.id}</h1>
-         <a href="${passLink}" style="display: inline-block; background: #000; color: #d4af37; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 10px;">View Digital Pass</a>
-      </div>
-      <p>Please present your digital pass upon arrival at Crossroads Maldives.</p>
+// Helper to construct HTML email
+const createHtmlEmail = (bodyContent: string, imageUrl?: string) => {
+    const imageHtml = imageUrl 
+        ? `<div style="margin-bottom: 20px;"><img src="${imageUrl}" alt="Event Banner" style="max-width: 100%; border-radius: 8px;" /></div>` 
+        : '';
+        
+    return `
+    <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+        ${imageHtml}
+        <div style="white-space: pre-wrap; line-height: 1.6;">${bodyContent}</div>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;" />
+        <p style="font-size: 12px; color: #888; text-align: center;">Velana Awards 2026</p>
     </div>
-  `;
+    `;
+};
 
-  await sendBirdEmail(guest.email, subject, htmlBody, textBody, config);
+export const sendGuestConfirmationEmail = async (guest: Guest, msConfig?: MicrosoftConfig): Promise<boolean> => {
+  const passUrl = `${window.location.origin}?guestId=${guest.id}`;
+  
+  if (msConfig && msConfig.clientId) {
+      const token = await getGraphAccessToken(msConfig.clientId);
+      if (token) {
+          console.log(`[Email Service] 📧 Sending via Microsoft 365 to: ${guest.email}`);
+          const htmlBody = createHtmlEmail(
+              `<p>Dear ${guest.name},</p>
+               <p>Thank you for confirming your attendance.</p>
+               <p><strong>Your Digital Pass:</strong> <a href="${passUrl}">Click here to view your QR Code</a></p>
+               <p>Please present this QR code at the entrance.</p>`
+          );
+          
+          await sendEmailViaGraph(token, {
+              to: guest.email,
+              subject: "Your Velana Awards 2026 Digital Pass",
+              htmlBody: htmlBody
+          });
+          return true;
+      }
+  }
+
+  // Fallback Simulation
+  console.log(`[Email Service] ⚠️ Simulation (No MS Config or Token)`);
+  console.log(`[Email Service] 📧 Sending QR Pass to: ${guest.email}`);
+  console.log(`[Email Service] Pass URL: ${passUrl}`);
+  await new Promise(resolve => setTimeout(resolve, 800));
   return true;
 };
 
-export const sendInvitationEmail = async (guest: Guest, template: EmailTemplate, config?: BirdConfig): Promise<boolean> => {
-  const rsvpLink = `${window.location.origin}?rsvp=true&guestId=${guest.id}`; // In a real app this might be an RSVP specific page
-  
+export const sendInvitationEmail = async (guest: Guest, template: EmailTemplate, msConfig?: MicrosoftConfig): Promise<boolean> => {
   const personalizedBody = template.body
-    .replace('{name}', guest.name)
-    .replace('{organization}', guest.organization)
-    .replace(/\n/g, '<br/>');
-
-  const textBody = template.body
     .replace('{name}', guest.name)
     .replace('{organization}', guest.organization);
 
-  const htmlBody = `
-    <div style="font-family: 'Times New Roman', serif; color: #000; max-width: 600px; margin: 0 auto;">
-      ${template.imageUrl ? `<img src="${template.imageUrl}" style="width: 100%; border-radius: 8px; margin-bottom: 20px;" />` : ''}
-      <h2 style="color: #d4af37; text-transform: uppercase;">${template.subject}</h2>
-      <div style="font-size: 16px; line-height: 1.6;">
-        ${personalizedBody}
-      </div>
-      <div style="text-align: center; margin-top: 30px;">
-        <a href="${rsvpLink}" style="background: #d4af37; color: #000; padding: 15px 30px; text-decoration: none; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; border-radius: 4px;">Confirm Attendance</a>
-      </div>
-    </div>
-  `;
+  if (msConfig && msConfig.clientId) {
+      const token = await getGraphAccessToken(msConfig.clientId);
+      if (token) {
+          console.log(`[Email Service] 📧 Sending via Microsoft 365 to: ${guest.email}`);
+          
+          const htmlBody = createHtmlEmail(personalizedBody, template.imageUrl);
+          
+          await sendEmailViaGraph(token, {
+              to: guest.email,
+              subject: template.subject,
+              htmlBody: htmlBody
+          });
+          return true;
+      }
+  }
 
-  await sendBirdEmail(guest.email, template.subject, htmlBody, textBody, config);
+  // Fallback Simulation
+  console.log(`[Email Service] ⚠️ Simulation (No MS Config or Token)`);
+  console.log(`[Email Service] 📧 Sending Invitation to: ${guest.email}`);
+  console.log(`[Email Service] Subject: ${template.subject}`);
+  console.log(`[Email Service] Body: ${personalizedBody}`);
+  await new Promise(resolve => setTimeout(resolve, 800));
   return true;
 };

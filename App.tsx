@@ -175,13 +175,15 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4">
-             <button 
-              onClick={() => handleViewChange('SCANNER')}
-              className="gold-gradient text-black px-4 py-2 rounded-lg font-bold flex items-center gap-2 text-sm hover:scale-105 transition-transform"
-            >
-              <UserCheck size={16} /> 
-              <span className="hidden sm:inline">Check-In</span>
-            </button>
+             {session && (
+               <button 
+                onClick={() => handleViewChange('SCANNER')}
+                className="gold-gradient text-black px-4 py-2 rounded-lg font-bold flex items-center gap-2 text-sm hover:scale-105 transition-transform"
+              >
+                <UserCheck size={16} /> 
+                <span className="hidden sm:inline">Check-In</span>
+              </button>
+             )}
             <button 
               className="md:hidden text-zinc-400"
               onClick={() => setIsMenuOpen(!isMenuOpen)}

@@ -29,11 +29,7 @@ export interface EmailTemplate {
   body: string;
 }
 
-export interface BirdConfig {
-  apiKey: string;
-  workspaceId: string;
-  // Email Settings
-  emailChannelId: string;
-  emailFromName: string;
-  emailFromAddress: string;
+export interface MicrosoftConfig {
+  clientId: string;
+  tenantId?: string;
 }

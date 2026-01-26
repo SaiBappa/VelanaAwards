@@ -1,12 +1,13 @@
 
 import React, { useEffect, useState } from 'react';
-import { Guest, EmailTemplate, BirdConfig } from '../types';
+import { Guest, EmailTemplate, MicrosoftConfig } from '../types';
 import { INVITED_ORGANIZATIONS, DEFAULT_GUEST_CATEGORIES } from '../constants';
 import { getAdminInsights } from '../services/geminiService';
 import { createGuest, bulkCreateGuests, updateGuestInvitationStatus } from '../services/dataService';
 import { sendInvitationEmail, sendGuestConfirmationEmail } from '../services/emailService';
+import { signInWithMicrosoft, getActiveAccount, logoutMicrosoft, getGraphAccessToken, sendEmailViaGraph } from '../services/msGraphService';
 import { supabase } from '../services/supabaseClient';
-import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut } from 'lucide-react';
+import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import * as XLSX from 'xlsx';
 import TicketView from './TicketView';
@@ -34,14 +35,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   // Settings / Email / Categories State
   const [selectedGuestIds, setSelectedGuestIds] = useState<Set<string>>(new Set());
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'CATEGORIES' | 'TEMPLATE' | 'BIRD'>('CATEGORIES');
-  const [sendingEmail, setSendingEmail] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'CATEGORIES' | 'TEMPLATE' | 'INTEGRATIONS'>('CATEGORIES');
   
+  // Email Sending State
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [pendingRecipientIds, setPendingRecipientIds] = useState<string[]>([]);
+
   // Ticket Viewer State
   const [viewTicketGuest, setViewTicketGuest] = useState<Guest | null>(null);
 
   // Notification State
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+
+  // Microsoft Config State
+  const [msConfig, setMsConfig] = useState<MicrosoftConfig>(() => {
+    const saved = localStorage.getItem('velana_ms_config');
+    // Default to provided credentials if no local storage found
+    return saved ? JSON.parse(saved) : { 
+      clientId: 'cf3f88f0-299e-4c15-8a46-322f422aea79',
+      tenantId: '535fef1c-582f-4349-a92a-62d1f8311719'
+    };
+  });
+  const [msAccount, setMsAccount] = useState<any>(null);
+  const [testEmailTarget, setTestEmailTarget] = useState('cto@macl.aero');
+  const [sendingTest, setSendingTest] = useState(false);
 
   // Dynamic Categories
   const [guestCategories, setGuestCategories] = useState<string[]>(() => {
@@ -57,17 +75,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
       subject: "You are invited: Velana Awards 2026",
       imageUrl: "https://images.unsplash.com/photo-1540206351-d6465b3ac5c1?q=80&w=2832",
       body: "Dear {name},\n\nWe are honored to invite you to the Velana Awards 2026. Join us for a night of celebration at Crossroads Maldives.\n\nPlease confirm your attendance by clicking the button below."
-    };
-  });
-
-  const [birdConfig, setBirdConfig] = useState<BirdConfig>(() => {
-    const saved = localStorage.getItem('velana_bird_config');
-    return saved ? JSON.parse(saved) : {
-      apiKey: '34JpJbKMMidGy73R7sM9dFRpnHa5yfwNgKKl',
-      workspaceId: '',
-      emailChannelId: '',
-      emailFromName: 'Velana Awards',
-      emailFromAddress: ''
     };
   });
   
@@ -87,6 +94,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   }, [initialGuests]);
 
   useEffect(() => {
+    // Check for active MS session
+    if (msConfig.clientId) {
+        getActiveAccount(msConfig.clientId, msConfig.tenantId).then(account => {
+            setMsAccount(account);
+        });
+    }
+  }, [msConfig.clientId, msConfig.tenantId]);
+
+  useEffect(() => {
     const fetchInsights = async () => {
       if (guests.length > 0) {
         const msg = await getAdminInsights(guests);
@@ -101,7 +117,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   // Auto-dismiss notification
   useEffect(() => {
     if (notification) {
-      const timer = setTimeout(() => setNotification(null), 4000);
+      const timer = setTimeout(() => setNotification(null), 6000); // Increased timeout for reading errors
       return () => clearTimeout(timer);
     }
   }, [notification]);
@@ -115,9 +131,58 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     setNotification({ type: 'success', message: 'Email template saved successfully.' });
   };
 
-  const saveBirdConfig = () => {
-    localStorage.setItem('velana_bird_config', JSON.stringify(birdConfig));
-    setNotification({ type: 'success', message: 'Bird configuration saved.' });
+  const saveMsConfig = () => {
+    localStorage.setItem('velana_ms_config', JSON.stringify(msConfig));
+    setNotification({ type: 'success', message: 'Microsoft configuration saved.' });
+  };
+
+  const handleMsLogin = async () => {
+    if (!msConfig.clientId) {
+        setNotification({ type: 'error', message: 'Please enter a Client ID first.' });
+        return;
+    }
+    try {
+        const account = await signInWithMicrosoft(msConfig.clientId, msConfig.tenantId);
+        setMsAccount(account);
+        setNotification({ type: 'success', message: `Connected as ${account.username}` });
+        saveMsConfig();
+    } catch (e: any) {
+        console.error(e);
+        // Show the actual error message from MSAL
+        setNotification({ type: 'error', message: `Connection failed: ${e.message || "Unknown error"}` });
+    }
+  };
+
+  const handleMsLogout = async () => {
+      if (msConfig.clientId) {
+          await logoutMicrosoft(msConfig.clientId, msConfig.tenantId);
+          setMsAccount(null);
+      }
+  };
+
+  const handleSendTestEmail = async () => {
+    if (!msConfig.clientId || !msAccount) {
+      setNotification({ type: 'error', message: 'Please connect Microsoft 365 first.' });
+      return;
+    }
+    setSendingTest(true);
+    try {
+      const token = await getGraphAccessToken(msConfig.clientId, msConfig.tenantId);
+      if (!token) throw new Error("Could not acquire token. Please reconnect Microsoft 365.");
+
+      await sendEmailViaGraph(token, {
+        to: testEmailTarget,
+        subject: "Test Email - Velana Awards System",
+        htmlBody: `<h3>System Test</h3><p>This is a test email sent from the Velana Awards Admin Dashboard.</p><p>Sent by: ${msAccount.username}</p>`
+      });
+
+      setNotification({ type: 'success', message: `Test email sent to ${testEmailTarget}` });
+    } catch (e: any) {
+      console.error(e);
+      setNotification({ type: 'error', message: 'Failed to send test email: ' + e.message });
+    } finally {
+      setSendingTest(false);
+    }
   };
 
   const handleAddCategory = () => {
@@ -169,21 +234,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     setSelectedGuestIds(newSet);
   };
 
-  // Invitation Logic
-  const handleSendInvitations = async (targetIds: string[] = []) => {
+  // --- Invitation Logic Start ---
+
+  // 1. Trigger the Modal
+  const initiateEmailSending = (targetIds: string[] = []) => {
     const idsToProcess = targetIds.length > 0 ? targetIds : Array.from(selectedGuestIds);
     if (idsToProcess.length === 0) return;
 
-    if (!window.confirm(`Send EMAIL invitations to ${idsToProcess.length} guest(s)?`)) return;
+    setPendingRecipientIds(idsToProcess);
+    setShowEmailPreview(true);
+  };
 
+  // 2. Actually Send (Called from Modal)
+  const processEmailSending = async () => {
     setSendingEmail(true);
     let successCount = 0;
 
-    for (const id of idsToProcess) {
+    for (const id of pendingRecipientIds) {
       const guest = guests.find(g => g.id === id);
       if (guest) {
         try {
-          await sendInvitationEmail(guest, emailTemplate, birdConfig);
+          await sendInvitationEmail(guest, emailTemplate, msConfig);
           const timestamp = await updateGuestInvitationStatus(id as string);
           
           setGuests(prev => prev.map(g => 
@@ -197,15 +268,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     }
 
     setSendingEmail(false);
-    setNotification({ type: 'success', message: `Successfully emailed ${successCount} guests` });
-    if (targetIds.length === 0) setSelectedGuestIds(new Set()); 
+    setShowEmailPreview(false);
+    setNotification({ type: 'success', message: `Invitation successfully sent to ${successCount} guest(s).` });
+    
+    // Clear selection if it was a bulk action
+    if (selectedGuestIds.size === pendingRecipientIds.length) {
+        setSelectedGuestIds(new Set()); 
+    }
+    setPendingRecipientIds([]);
   };
+
+  // --- Invitation Logic End ---
 
   const handleSendPassEmail = async (guest: Guest) => {
     try {
       setNotification({ type: 'success', message: 'Sending pass...' });
-      await sendGuestConfirmationEmail(guest, birdConfig);
-      setNotification({ type: 'success', message: `QR Pass sent to ${guest.name}` });
+      await sendGuestConfirmationEmail(guest, msConfig);
+      setNotification({ type: 'success', message: `QR Pass email sent to ${guest.name}` });
     } catch (e) {
       console.error(e);
       setNotification({ type: 'error', message: 'Failed to send pass.' });
@@ -340,6 +419,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     g.organization.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Helper for preview
+  const sampleGuestForPreview = pendingRecipientIds.length > 0 
+    ? guests.find(g => g.id === pendingRecipientIds[0]) 
+    : null;
+
+  const previewBody = sampleGuestForPreview 
+    ? emailTemplate.body
+        .replace('{name}', sampleGuestForPreview.name)
+        .replace('{organization}', sampleGuestForPreview.organization)
+    : '';
+
   return (
     <div className="space-y-8 pb-20 relative">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -367,6 +457,74 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
         </div>
       </header>
 
+      {/* Email Preview Modal */}
+      {showEmailPreview && sampleGuestForPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-zinc-900 border border-zinc-700 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+                 <div>
+                    <h3 className="serif text-xl font-bold text-white flex items-center gap-2">
+                      <Send className="text-yellow-500" size={20} /> Send Invitations
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      You are about to email <strong className="text-white">{pendingRecipientIds.length}</strong> guest(s).
+                    </p>
+                 </div>
+                 <button onClick={() => setShowEmailPreview(false)} className="text-zinc-400 hover:text-white"><X size={20}/></button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
+                 <div className="bg-white rounded-xl overflow-hidden text-black shadow-lg">
+                    {emailTemplate.imageUrl && (
+                      <div className="h-32 w-full overflow-hidden">
+                        <img src={emailTemplate.imageUrl} alt="Banner" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <div className="p-6 space-y-4">
+                       <div>
+                          <p className="text-xs font-bold text-zinc-400 uppercase">Subject</p>
+                          <p className="font-serif text-lg font-bold">{emailTemplate.subject}</p>
+                       </div>
+                       <hr className="border-zinc-100" />
+                       <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+                          {previewBody}
+                       </div>
+                       <div className="flex justify-center pt-4">
+                          <button disabled className="bg-yellow-600 text-black font-bold px-6 py-3 rounded-md uppercase text-xs tracking-widest opacity-80 cursor-not-allowed">
+                             Confirm Attendance
+                          </button>
+                       </div>
+                       <p className="text-center text-[10px] text-zinc-400 mt-2">*This is a preview of the email guest will receive. The button above is disabled here.</p>
+                    </div>
+                 </div>
+                 
+                 {/* Integration Status in Preview */}
+                 <div className="text-center text-xs text-zinc-500">
+                    Sending via: <span className={msAccount ? "text-green-500 font-bold" : "text-yellow-500 font-bold"}>
+                        {msAccount ? `Microsoft 365 (${msAccount.username})` : 'Simulation Mode'}
+                    </span>
+                 </div>
+              </div>
+
+              <div className="p-6 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-3">
+                 <button 
+                   onClick={() => setShowEmailPreview(false)}
+                   className="px-6 py-3 rounded-xl font-bold text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                 >
+                   Cancel
+                 </button>
+                 <button 
+                   onClick={processEmailSending}
+                   disabled={sendingEmail}
+                   className="px-6 py-3 rounded-xl font-bold bg-yellow-600 text-black hover:bg-yellow-500 transition-colors flex items-center gap-2"
+                 >
+                   {sendingEmail ? <span className="animate-pulse">Sending...</span> : <>Confirm & Send <ArrowRight size={16} /></>}
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
+
       {/* Configuration Settings Modal */}
       {showSettingsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
@@ -392,8 +550,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                  <Mail size={14} /> Email
                </button>
                <button 
-                onClick={() => setSettingsTab('BIRD')}
-                className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${settingsTab === 'BIRD' ? 'text-yellow-500 border-b-2 border-yellow-500 bg-yellow-500/10' : 'text-zinc-400 hover:bg-zinc-800'}`}
+                onClick={() => setSettingsTab('INTEGRATIONS')}
+                className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${settingsTab === 'INTEGRATIONS' ? 'text-yellow-500 border-b-2 border-yellow-500 bg-yellow-500/10' : 'text-zinc-400 hover:bg-zinc-800'}`}
                >
                  <LinkIcon size={14} /> Integrations
                </button>
@@ -475,46 +633,85 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                 </div>
               )}
 
-              {settingsTab === 'BIRD' && (
-                <div className="space-y-6">
-                  {/* API & Workspace */}
-                  <div className="bg-zinc-800/50 p-4 rounded-xl border border-zinc-700 space-y-4">
-                     <h4 className="text-sm font-bold text-white flex items-center gap-2"><LinkIcon size={14} className="text-yellow-500"/> General API Settings</h4>
-                     <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Bird API Key (Access Key)</label>
-                        <input type="password" className="w-full bg-zinc-900 border border-zinc-700 p-3 rounded-lg text-white" value={birdConfig.apiKey} onChange={e => setBirdConfig({...birdConfig, apiKey: e.target.value})} />
-                     </div>
-                     <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Workspace ID</label>
-                        <input className="w-full bg-zinc-900 border border-zinc-700 p-3 rounded-lg text-white" value={birdConfig.workspaceId} onChange={e => setBirdConfig({...birdConfig, workspaceId: e.target.value})} placeholder="Found in Bird Dashboard URL" />
-                     </div>
-                  </div>
+              {settingsTab === 'INTEGRATIONS' && (
+                  <div className="space-y-6">
+                      <div className="bg-zinc-800/50 p-6 rounded-xl border border-zinc-700 space-y-4">
+                          <h4 className="font-bold text-white flex items-center gap-2">
+                             <div className="w-6 h-6 bg-blue-500 text-white flex items-center justify-center rounded-md text-xs">MS</div> Microsoft 365
+                          </h4>
+                          <p className="text-xs text-zinc-400">
+                             Send invitations directly from your Outlook/Office 365 account. Requires an App Registration in Azure AD with <code>Mail.Send</code> permissions.
+                          </p>
+                          <div className="text-xs bg-black/30 p-3 rounded border border-zinc-700 font-mono text-zinc-500">
+                              Redirect URI: {window.location.origin}
+                          </div>
+                          
+                          <div>
+                            <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Application (Client) ID</label>
+                            <input 
+                                className="w-full bg-zinc-900 border border-zinc-700 p-3 rounded-lg text-white mb-2" 
+                                value={msConfig.clientId} 
+                                onChange={e => setMsConfig({...msConfig, clientId: e.target.value})}
+                                placeholder="e.g. 00000000-0000-0000-0000-000000000000" 
+                            />
+                             <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Directory (Tenant) ID</label>
+                            <input 
+                                className="w-full bg-zinc-900 border border-zinc-700 p-3 rounded-lg text-white mb-2" 
+                                value={msConfig.tenantId || ''} 
+                                onChange={e => setMsConfig({...msConfig, tenantId: e.target.value})}
+                                placeholder="e.g. 535fef1c-582f-4349-a92a-62d1f8311719" 
+                            />
+                            <button onClick={saveMsConfig} className="text-xs text-yellow-500 hover:underline">Save Config</button>
+                          </div>
 
-                  {/* Email Settings */}
-                  <div className="bg-zinc-800/50 p-4 rounded-xl border border-zinc-700 space-y-4">
-                     <h4 className="text-sm font-bold text-white flex items-center gap-2"><Mail size={14} className="text-yellow-500"/> Email Channel</h4>
-                     <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Email Channel ID</label>
-                        <input className="w-full bg-zinc-900 border border-zinc-700 p-3 rounded-lg text-white" value={birdConfig.emailChannelId} onChange={e => setBirdConfig({...birdConfig, emailChannelId: e.target.value})} placeholder="From Channels menu" />
-                     </div>
-                     <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Sender Name</label>
-                            <input className="w-full bg-zinc-900 border border-zinc-700 p-3 rounded-lg text-white" value={birdConfig.emailFromName} onChange={e => setBirdConfig({...birdConfig, emailFromName: e.target.value})} />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Sender Address (Optional)</label>
-                            <input className="w-full bg-zinc-900 border border-zinc-700 p-3 rounded-lg text-white" value={birdConfig.emailFromAddress} onChange={e => setBirdConfig({...birdConfig, emailFromAddress: e.target.value})} placeholder="events@velana.com" />
-                        </div>
-                     </div>
+                          <div className="pt-2 border-t border-zinc-700">
+                              {msAccount ? (
+                                  <div className="space-y-4">
+                                    <div className="flex items-center justify-between bg-green-900/20 border border-green-900/50 p-3 rounded-lg">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-white font-bold text-xs">
+                                                {msAccount.username.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <p className="text-sm text-white font-medium">Connected</p>
+                                                <p className="text-xs text-zinc-400">{msAccount.username}</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={handleMsLogout} className="text-xs text-red-400 hover:text-red-300">Disconnect</button>
+                                    </div>
+                                    
+                                    {/* Test Email Section */}
+                                    <div className="bg-zinc-900 p-3 rounded-lg border border-zinc-800">
+                                       <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Test Configuration</label>
+                                       <div className="flex gap-2">
+                                          <input 
+                                            className="flex-1 bg-zinc-800 border border-zinc-700 p-2 rounded text-sm text-white" 
+                                            value={testEmailTarget}
+                                            onChange={(e) => setTestEmailTarget(e.target.value)}
+                                            placeholder="cto@macl.aero"
+                                          />
+                                          <button 
+                                            onClick={handleSendTestEmail}
+                                            disabled={sendingTest}
+                                            className="bg-zinc-700 hover:bg-zinc-600 text-white px-3 py-2 rounded text-xs font-bold flex items-center gap-1"
+                                          >
+                                            {sendingTest ? <PlayCircle size={14} className="animate-pulse" /> : <PlayCircle size={14} />} 
+                                            Send Test
+                                          </button>
+                                       </div>
+                                    </div>
+                                  </div>
+                              ) : (
+                                  <button 
+                                    onClick={handleMsLogin}
+                                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+                                  >
+                                    Connect Microsoft 365
+                                  </button>
+                              )}
+                          </div>
+                      </div>
                   </div>
-
-                  <div className="flex justify-end pt-2">
-                     <button onClick={saveBirdConfig} className="bg-yellow-600 text-black font-bold px-6 py-3 rounded-lg hover:bg-yellow-500 transition-colors w-full sm:w-auto">
-                       Save Integrations
-                     </button>
-                  </div>
-                </div>
               )}
             </div>
           </div>
@@ -537,7 +734,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                     onClick={() => handleSendPassEmail(viewTicketGuest)}
                     className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors text-sm"
                   >
-                      <Send size={16} /> Email Pass
+                      <Send size={16} /> Send/Resend Pass Email
                   </button>
               </div>
           </div>
@@ -716,11 +913,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                   <Settings size={14} /> Settings
                 </button>
                 <button 
-                  onClick={() => handleSendInvitations()}
+                  onClick={() => initiateEmailSending()}
                   disabled={selectedGuestIds.size === 0 || sendingEmail}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold uppercase transition-colors ${selectedGuestIds.size > 0 ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}`}
                 >
-                  {sendingEmail ? <span className="animate-pulse">Sending...</span> : <><Send size={14} /> Send Email ({selectedGuestIds.size})</>}
+                  <Send size={14} /> Send Email ({selectedGuestIds.size})
                 </button>
                 <button 
                   onClick={() => setShowImportModal(true)}
@@ -770,12 +967,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                       <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             {guest.invitationSent ? (
-                              <span className="flex items-center gap-1.5 text-xs text-green-400 bg-green-900/20 px-2 py-0.5 rounded-md border border-green-900/30">
-                                  <CheckCircle size={10} /> Email
+                              <span className="flex items-center gap-1.5 text-xs text-green-400 bg-green-900/20 px-2 py-0.5 rounded-md border border-green-900/30 font-bold uppercase tracking-wider">
+                                  <CheckCircle size={12} /> Invited
                               </span>
                             ) : (
-                              <span className="flex items-center gap-1.5 text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-md">
-                                  <Mail size={10} /> Email
+                              <span className="flex items-center gap-1.5 text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                                  <Mail size={12} /> Pending
                               </span>
                             )}
                           </div>
@@ -790,6 +987,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
+                         {/* Specific Resend Button */}
+                         {guest.invitationSent && (
+                           <button 
+                             onClick={() => initiateEmailSending([guest.id])}
+                             title="Resend Invitation Email"
+                             className="text-zinc-400 hover:text-blue-400 transition-colors p-1.5 hover:bg-blue-900/10 rounded-lg"
+                           >
+                             <RefreshCcw size={18} />
+                           </button>
+                         )}
+                         {/* First Time Send Button (if singular action preferred over bulk) */}
+                         {!guest.invitationSent && (
+                           <button 
+                             onClick={() => initiateEmailSending([guest.id])}
+                             title="Send Invitation"
+                             className="text-zinc-400 hover:text-green-400 transition-colors p-1.5 hover:bg-green-900/10 rounded-lg"
+                           >
+                             <Send size={18} />
+                           </button>
+                         )}
+
                          <button 
                            onClick={() => setViewTicketGuest(guest)}
                            title="View & Send QR Pass"

@@ -18,7 +18,8 @@
     "react-dom": "^19.2.3",
     "html-to-image": "^1.11.11",
     "xlsx": "^0.18.5",
-    "@supabase/supabase-js": "2"
+    "@supabase/supabase-js": "2",
+    "@azure/msal-browser": "3.10.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
