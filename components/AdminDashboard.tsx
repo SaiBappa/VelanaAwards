@@ -3,11 +3,11 @@ import React, { useEffect, useState } from 'react';
 import { Guest, EmailTemplate, MicrosoftConfig } from '../types';
 import { INVITED_ORGANIZATIONS, DEFAULT_GUEST_CATEGORIES } from '../constants';
 import { getAdminInsights } from '../services/geminiService';
-import { createGuest, bulkCreateGuests, updateGuestInvitationStatus } from '../services/dataService';
+import { createGuest, bulkCreateGuests, updateGuestInvitationStatus, updateGuest } from '../services/dataService';
 import { sendInvitationEmail, sendGuestConfirmationEmail } from '../services/emailService';
 import { signInWithMicrosoft, getActiveAccount, logoutMicrosoft, getGraphAccessToken, sendEmailViaGraph } from '../services/msGraphService';
 import { supabase } from '../services/supabaseClient';
-import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle, HelpCircle } from 'lucide-react';
+import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle, HelpCircle, Edit } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import * as XLSX from 'xlsx';
 import TicketView from './TicketView';
@@ -42,6 +42,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   const [importFile, setImportFile] = useState<File | null>(null);
   const [parsedGuests, setParsedGuests] = useState<Guest[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Edit State
+  const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   // Settings / Email / Categories State
   const [selectedGuestIds, setSelectedGuestIds] = useState<Set<string>>(new Set());
@@ -307,6 +311,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     } catch (e) {
       console.error(e);
       setNotification({ type: 'error', message: 'Failed to send pass.' });
+    }
+  };
+
+  const handleUpdateGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGuest) return;
+    setIsUpdating(true);
+    try {
+      await updateGuest(editingGuest);
+      setGuests(prev => prev.map(g => g.id === editingGuest.id ? editingGuest : g));
+      setNotification({ type: 'success', message: "Guest updated successfully" });
+      setEditingGuest(null);
+    } catch (err: any) {
+      setNotification({ type: 'error', message: "Failed to update guest: " + (err.message || "") });
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -655,6 +675,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
 
               {settingsTab === 'INTEGRATIONS' && (
                   <div className="space-y-6">
+                      {/* Microsoft 365 Section */}
                       <div className="bg-zinc-800/50 p-6 rounded-xl border border-zinc-700 space-y-4">
                           <h4 className="font-bold text-white flex items-center gap-2">
                              <div className="w-6 h-6 bg-blue-500 text-white flex items-center justify-center rounded-md text-xs">MS</div> Microsoft 365
@@ -745,6 +766,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                               )}
                           </div>
                       </div>
+
+                      {/* NEW Supabase/Domain Section */}
+                      <div className="bg-zinc-800/50 p-6 rounded-xl border border-zinc-700 space-y-4">
+                          <h4 className="font-bold text-white flex items-center gap-2">
+                              <div className="w-6 h-6 bg-emerald-600 text-white flex items-center justify-center rounded-md text-xs">SB</div> 
+                              Supabase & Domain Setup
+                          </h4>
+                          <p className="text-xs text-zinc-400">
+                              When switching to a custom domain (like <strong>events.macl.aero</strong>), you must update your Supabase Auth settings to prevent login errors.
+                          </p>
+                          <div className="bg-emerald-900/20 border border-emerald-900/40 p-4 rounded-lg">
+                              <h5 className="text-xs font-bold text-emerald-400 flex items-center gap-2 mb-2">
+                                  <CheckCircle size={14} /> Required Action
+                              </h5>
+                              <ol className="text-[11px] text-zinc-300 list-decimal pl-4 space-y-1">
+                                  <li>Go to <strong>Supabase Dashboard</strong> {'>'} Authentication {'>'} URL Configuration.</li>
+                                  <li>Add <code className="bg-black/30 px-1 rounded select-all">{window.location.origin}</code> to <strong>Redirect URLs</strong>.</li>
+                                  <li>Ensure <strong>Site URL</strong> is set to your primary domain.</li>
+                              </ol>
+                          </div>
+                      </div>
                   </div>
               )}
             </div>
@@ -771,6 +813,73 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                       <Send size={16} /> Send/Resend Pass Email
                   </button>
               </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Guest Modal */}
+      {editingGuest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-zinc-900 border border-zinc-700 w-full max-w-xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center p-6 border-b border-zinc-800">
+              <h3 className="serif text-2xl font-bold text-white">Edit Guest</h3>
+              <button onClick={() => setEditingGuest(null)} className="text-zinc-400 hover:text-white"><X size={24} /></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto custom-scrollbar">
+                <form onSubmit={handleUpdateGuest} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Full Name</label>
+                      <input required className="w-full bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white" value={editingGuest.name} onChange={e => setEditingGuest({...editingGuest, name: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Email</label>
+                      <input required type="email" className="w-full bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white" value={editingGuest.email} onChange={e => setEditingGuest({...editingGuest, email: e.target.value})} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Organization</label>
+                      <input required className="w-full bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white" value={editingGuest.organization} onChange={e => setEditingGuest({...editingGuest, organization: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Designation</label>
+                      <input required className="w-full bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white" value={editingGuest.designation} onChange={e => setEditingGuest({...editingGuest, designation: e.target.value})} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Mobile</label>
+                      <div className="flex gap-2">
+                        <select 
+                          className="bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white outline-none"
+                          value={editingGuest.countryCode}
+                          onChange={(e) => setEditingGuest({...editingGuest, countryCode: e.target.value})}
+                        >
+                          {COUNTRY_CODES.map(code => <option key={code} value={code}>{code}</option>)}
+                        </select>
+                        <input className="flex-1 bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white" value={editingGuest.mobile} onChange={e => setEditingGuest({...editingGuest, mobile: e.target.value})} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Category</label>
+                      <select 
+                        className="w-full bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white" 
+                        value={editingGuest.awardCategory} 
+                        onChange={e => setEditingGuest({...editingGuest, awardCategory: e.target.value})}
+                      >
+                         {guestCategories.map(cat => (
+                           <option key={cat} value={cat}>{cat}</option>
+                         ))}
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" disabled={isUpdating} className="w-full bg-yellow-600 text-black font-bold py-3 rounded-lg hover:bg-yellow-500 transition-colors mt-4">
+                    {isUpdating ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </form>
+            </div>
           </div>
         </div>
       )}
@@ -1049,6 +1158,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                          >
                            <QrCode size={18} />
                          </button>
+                         
+                         <button 
+                           onClick={() => setEditingGuest(guest)}
+                           title="Edit Guest"
+                           className="text-zinc-400 hover:text-blue-400 transition-colors p-1.5 hover:bg-blue-900/10 rounded-lg"
+                         >
+                           <Edit size={18} />
+                         </button>
+
                          <button 
                            onClick={() => {
                               if(confirm('Delete guest?')) {
@@ -1062,42 +1180,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                            <Trash2 size={18} />
                          </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'ORGS' && (
-        <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden animate-in fade-in">
-           <div className="p-6 border-b border-zinc-800">
-             <h3 className="font-semibold">Organization Breakdown</h3>
-           </div>
-           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-zinc-800/50 text-zinc-400 font-medium">
-                <tr>
-                  <th className="px-6 py-4">Organization Name</th>
-                  <th className="px-6 py-4">Total Registered</th>
-                  <th className="px-6 py-4">Arrived</th>
-                  <th className="px-6 py-4">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {orgStats.map(org => (
-                  <tr key={org.name} className="hover:bg-zinc-800/30">
-                    <td className="px-6 py-4 font-medium">{org.name}</td>
-                    <td className="px-6 py-4">{org.rsvpCount}</td>
-                    <td className="px-6 py-4">{org.checkedInCount}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded text-[10px] uppercase font-bold ${
-                        org.status === 'Active' ? 'bg-green-900/30 text-green-500' : 'bg-red-900/30 text-red-500'
-                      }`}>
-                        {org.status}
-                      </span>
                     </td>
                   </tr>
                 ))}

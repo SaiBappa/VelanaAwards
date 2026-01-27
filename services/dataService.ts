@@ -81,6 +81,26 @@ export const bulkCreateGuests = async (guests: Guest[]): Promise<void> => {
   }
 };
 
+export const updateGuest = async (guest: Guest): Promise<void> => {
+  const { error } = await supabase
+    .from('guests')
+    .update({
+      name: guest.name,
+      email: guest.email,
+      country_code: guest.countryCode,
+      mobile: guest.mobile,
+      organization: guest.organization,
+      designation: guest.designation,
+      award_category: guest.awardCategory
+    })
+    .eq('id', guest.id);
+
+  if (error) {
+    console.error('Error updating guest:', error);
+    throw error;
+  }
+};
+
 export const updateGuestCheckIn = async (id: string): Promise<string> => {
   const timestamp = new Date().toISOString();
   const { error } = await supabase

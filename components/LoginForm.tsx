@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { APP_BASE_URL } from '../constants';
-import { Lock, Mail, Loader2, AlertCircle, LayoutGrid, Info, Copy, Check, Globe } from 'lucide-react';
+import { Lock, Mail, Loader2, AlertCircle, LayoutGrid } from 'lucide-react';
 
 interface LoginFormProps {
   onSuccess: () => void;
@@ -12,10 +13,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  const supabaseUrl = 'https://pvvyboirjajvewsbadnl.supabase.co'; // From supabaseClient.ts
-  const azureCallbackUri = `${supabaseUrl}/auth/v1/callback`;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,12 +55,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
     }
   };
 
-  const copyToClipboard = (text: string) => {
-      navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
     <div className="min-h-[60vh] flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 p-8 rounded-3xl shadow-2xl">
@@ -86,49 +77,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
             {loading ? <Loader2 className="animate-spin" size={20} /> : <LayoutGrid size={20} />}
             Sign in with Microsoft
           </button>
-
-          {/* Configuration Help */}
-          <div className="bg-zinc-950/50 border border-blue-900/30 p-4 rounded-xl text-left space-y-4">
-                <div>
-                    <h4 className="text-xs font-bold text-blue-400 mb-2 uppercase tracking-wider flex items-center gap-2">
-                        <Info size={14} /> 1. Azure Setup (Fix AADSTS50011)
-                    </h4>
-                    <p className="text-[10px] text-zinc-400 mb-2 leading-relaxed">
-                        Add this URI to <strong>Azure Portal</strong> {'>'} App Registration {'>'} Authentication {'>'} Web Platform.
-                    </p>
-                    <div className="bg-black/50 border border-zinc-700 rounded-lg p-2 flex items-center justify-between gap-2">
-                        <code className="text-[10px] text-zinc-300 font-mono truncate select-all">
-                            {azureCallbackUri}
-                        </code>
-                        <button 
-                            onClick={() => copyToClipboard(azureCallbackUri)}
-                            className="text-zinc-400 hover:text-white transition-colors"
-                        >
-                            <Copy size={14} />
-                        </button>
-                    </div>
-                </div>
-
-                <div>
-                    <h4 className="text-xs font-bold text-green-400 mb-2 uppercase tracking-wider flex items-center gap-2">
-                        <Globe size={14} /> 2. Supabase Setup (Cloud Run)
-                    </h4>
-                    <p className="text-[10px] text-zinc-400 mb-2 leading-relaxed">
-                        Add your Cloud Run URL to <strong>Supabase Dashboard</strong> {'>'} Authentication {'>'} URL Configuration {'>'} Redirect URLs.
-                    </p>
-                    <div className="bg-black/50 border border-zinc-700 rounded-lg p-2 flex items-center justify-between gap-2">
-                        <code className="text-[10px] text-zinc-300 font-mono truncate select-all">
-                            {APP_BASE_URL}
-                        </code>
-                        <button 
-                            onClick={() => copyToClipboard(APP_BASE_URL)}
-                            className="text-zinc-400 hover:text-white transition-colors"
-                        >
-                            <Copy size={14} />
-                        </button>
-                    </div>
-                </div>
-          </div>
 
           <div className="relative flex py-2 items-center">
             <div className="flex-grow border-t border-zinc-800"></div>

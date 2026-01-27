@@ -202,10 +202,20 @@ const App: React.FC = () => {
           <div className="hidden md:flex items-center gap-2">
             <NavItem target="HOME" icon={Home} label="Home" />
             <NavItem target="CATEGORIES" icon={Award} label="Awards" />
-            <NavItem target="ADMIN" icon={ShieldCheck} label="Admin" />
           </div>
 
           <div className="flex items-center gap-4">
+             {/* Admin / Login Button */}
+             <button
+                onClick={() => handleViewChange('ADMIN')}
+                className={`flex items-center gap-2 text-sm font-medium transition-colors ${
+                  view === 'ADMIN' || view === 'LOGIN' ? 'text-yellow-500' : 'text-zinc-400 hover:text-white'
+                }`}
+             >
+                <ShieldCheck size={18} />
+                <span className="hidden sm:inline">{session ? 'Dashboard' : 'Login'}</span>
+             </button>
+
              {session && (
                <button 
                 onClick={() => handleViewChange('SCANNER')}
@@ -229,7 +239,7 @@ const App: React.FC = () => {
           <div className="md:hidden absolute top-full left-0 w-full bg-zinc-900 border-b border-zinc-800 py-4 animate-in slide-in-from-top duration-300">
             <NavItem target="HOME" icon={Home} label="Home" />
             <NavItem target="CATEGORIES" icon={Award} label="Awards" />
-            <NavItem target="ADMIN" icon={ShieldCheck} label="Admin" />
+            <NavItem target="ADMIN" icon={ShieldCheck} label={session ? "Dashboard" : "Login"} />
           </div>
         )}
       </nav>
