@@ -16,7 +16,8 @@ const mapToGuest = (row: any): Guest => ({
   checkedIn: row.checked_in,
   checkInTime: row.check_in_time,
   invitationSent: row.invitation_sent,
-  invitationSentAt: row.invitation_sent_at
+  invitationSentAt: row.invitation_sent_at,
+  rsvpConfirmed: row.rsvp_confirmed
 });
 
 export const fetchAllGuests = async (): Promise<Guest[]> => {
@@ -47,7 +48,8 @@ export const createGuest = async (guest: Guest): Promise<void> => {
       award_category: guest.awardCategory,
       rsvp_date: guest.rsvpDate,
       checked_in: guest.checkedIn,
-      invitation_sent: false
+      invitation_sent: false,
+      rsvp_confirmed: guest.rsvpConfirmed
     }]);
 
   if (error) {
@@ -68,7 +70,8 @@ export const bulkCreateGuests = async (guests: Guest[]): Promise<void> => {
     award_category: guest.awardCategory,
     rsvp_date: guest.rsvpDate,
     checked_in: guest.checkedIn,
-    invitation_sent: false
+    invitation_sent: false,
+    rsvp_confirmed: guest.rsvpConfirmed
   }));
 
   const { error } = await supabase
@@ -133,6 +136,18 @@ export const updateGuestInvitationStatus = async (id: string): Promise<string> =
     throw error;
   }
   return timestamp;
+};
+
+export const confirmGuestRSVP = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('guests')
+    .update({ rsvp_confirmed: true })
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error confirming RSVP:', error);
+    throw error;
+  }
 };
 
 export const removeGuest = async (id: string): Promise<void> => {

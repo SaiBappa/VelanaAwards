@@ -100,7 +100,7 @@ export const sendInvitationEmail = async (guest: Guest, template: EmailTemplate,
       if (token) {
           console.log(`[Email Service] 📧 Sending via Microsoft 365 to: ${guest.email}`);
           
-          const htmlBody = createHtmlEmail(personalizedBody, template.imageUrl, rsvpUrl, "Confirm Attendance");
+          const htmlBody = createHtmlEmail(personalizedBody, template.imageUrl, rsvpUrl, "RSVP");
           
           await sendEmailViaGraph(token, {
               to: guest.email,

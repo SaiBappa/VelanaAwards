@@ -52,7 +52,8 @@ const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
         id: generateId(),
         awardCategory: isNominee ? "Nominee / Partner" : "Not an Award Recipient",
         rsvpDate: new Date().toISOString(),
-        checkedIn: false
+        checkedIn: false,
+        rsvpConfirmed: true // Self-registered means confirmed
       };
 
       // 1. Create in Database
@@ -173,7 +174,7 @@ const RSVPForm: React.FC<RSVPFormProps> = ({ onSuccess }) => {
               <Loader2 className="animate-spin" size={20} /> Processing...
             </>
           ) : (
-            "Confirm Attendance"
+            "RSVP"
           )}
         </button>
       </form>

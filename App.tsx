@@ -6,7 +6,7 @@ import TicketView from './components/TicketView';
 import AdminDashboard from './components/AdminDashboard';
 import QRScanner from './components/QRScanner';
 import LoginForm from './components/LoginForm';
-import { fetchAllGuests, updateGuestCheckIn, removeGuest } from './services/dataService';
+import { fetchAllGuests, updateGuestCheckIn, removeGuest, confirmGuestRSVP } from './services/dataService';
 import { supabase } from './services/supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import { Calendar, UserCheck, ShieldCheck, Home, ArrowRight, Menu, X, Plane, MapPin, Award, Box, Coffee, Trophy, ExternalLink, Loader2 } from 'lucide-react';
@@ -82,6 +82,16 @@ const App: React.FC = () => {
           const targetGuest = guestsData.find(g => g.id === guestId);
           if (targetGuest) {
             console.log("Found guest from link:", targetGuest);
+            
+            // Automatically confirm RSVP if they visited the link
+            if (!targetGuest.rsvpConfirmed) {
+                confirmGuestRSVP(targetGuest.id).then(() => {
+                    console.log("RSVP Confirmed for", targetGuest.name);
+                }).catch(err => console.error("Failed to confirm RSVP", err));
+                // Optimistic update
+                targetGuest.rsvpConfirmed = true; 
+            }
+
             setCurrentGuest(targetGuest);
             setView('TICKET');
             // Clean URL

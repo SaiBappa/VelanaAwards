@@ -379,6 +379,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
           rsvpDate: new Date().toISOString(),
           checkedIn: false,
           invitationSent: false,
+          rsvpConfirmed: false // Imported guests default to not confirmed
         })).filter(g => g.name !== 'Unknown' && g.email !== '');
 
         setParsedGuests(mappedData);
@@ -418,6 +419,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
         rsvpDate: new Date().toISOString(),
         checkedIn: false,
         invitationSent: false,
+        rsvpConfirmed: false // Manually added guests default to not confirmed
       };
       await createGuest(newGuest);
       setGuests(prev => [newGuest, ...prev]);
@@ -531,7 +533,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                        </div>
                        <div className="flex justify-center pt-4">
                           <button disabled className="bg-yellow-600 text-black font-bold px-6 py-3 rounded-md uppercase text-xs tracking-widest opacity-80 cursor-not-allowed">
-                             Confirm Attendance
+                             RSVP
                           </button>
                        </div>
                        <p className="text-center text-[10px] text-zinc-400 mt-2">*This is a preview of the email guest will receive. The button above is disabled here.</p>
@@ -1083,6 +1085,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                   <th className="px-6 py-4">Name / Designation</th>
                   <th className="px-6 py-4">Contact</th>
                   <th className="px-6 py-4">Invitation Status</th>
+                  <th className="px-6 py-4">RSVP Status</th>
                   <th className="px-6 py-4">Check-In</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
@@ -1120,6 +1123,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                             )}
                           </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                       {guest.rsvpConfirmed ? (
+                          <span className="flex items-center gap-1.5 text-xs text-green-500 font-bold uppercase tracking-wider">
+                             <CheckCircle size={14} /> Confirmed
+                          </span>
+                       ) : (
+                          <span className="flex items-center gap-1.5 text-xs text-zinc-500 uppercase tracking-wider">
+                             Pending
+                          </span>
+                       )}
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${

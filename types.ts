@@ -13,6 +13,7 @@ export interface Guest {
   checkInTime?: string;
   invitationSent?: boolean;
   invitationSentAt?: string;
+  rsvpConfirmed?: boolean;
 }
 
 export type ViewState = 'HOME' | 'TICKET' | 'ADMIN' | 'SCANNER' | 'CATEGORIES' | 'LOGIN';
