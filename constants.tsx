@@ -1,6 +1,10 @@
 
 import React from 'react';
 
+// Automatically detect the domain (Localhost or Cloud Run)
+// If you need to force a specific domain, replace window.location.origin with "https://your-app-name.run.app"
+export const APP_BASE_URL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
 export const EVENT_DETAILS = {
   name: "Velana Awards 2026",
   date: "12th February 2026, Thursday",

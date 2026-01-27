@@ -1,5 +1,6 @@
 
 import { PublicClientApplication } from "@azure/msal-browser";
+import { APP_BASE_URL } from "../constants";
 
 let msalInstance: PublicClientApplication | null = null;
 let currentClientId: string | null = null;
@@ -19,11 +20,12 @@ export const initializeMsal = async (clientId: string, tenantId?: string) => {
 
   // Create new instance
   console.log(`[MS Graph] Initializing MSAL with ClientID: ${clientId} and Authority: ${authority}`);
+  console.log(`[MS Graph] Redirect URI: ${APP_BASE_URL}`);
   
   msalInstance = await PublicClientApplication.createPublicClientApplication({
     auth: {
       clientId: clientId,
-      redirectUri: window.location.origin,
+      redirectUri: APP_BASE_URL,
       authority: authority
     },
     cache: {

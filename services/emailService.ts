@@ -1,6 +1,7 @@
 
 import { Guest, EmailTemplate, MicrosoftConfig } from "../types";
 import { getGraphAccessToken, sendEmailViaGraph } from "./msGraphService";
+import { APP_BASE_URL } from "../constants";
 
 // Helper to construct HTML email with optional CTA button
 const createHtmlEmail = (bodyContent: string, imageUrl?: string, ctaUrl?: string, ctaText: string = "View Details") => {
@@ -53,7 +54,7 @@ const createHtmlEmail = (bodyContent: string, imageUrl?: string, ctaUrl?: string
 };
 
 export const sendGuestConfirmationEmail = async (guest: Guest, msConfig?: MicrosoftConfig): Promise<boolean> => {
-  const passUrl = `${window.location.origin}?guestId=${guest.id}`;
+  const passUrl = `${APP_BASE_URL}?guestId=${guest.id}`;
   
   if (msConfig && msConfig.clientId) {
       const token = await getGraphAccessToken(msConfig.clientId);
@@ -92,7 +93,7 @@ export const sendInvitationEmail = async (guest: Guest, template: EmailTemplate,
     .replace('{organization}', guest.organization);
 
   // The RSVP URL effectively acts as the pass URL for pre-registered guests
-  const rsvpUrl = `${window.location.origin}?guestId=${guest.id}`;
+  const rsvpUrl = `${APP_BASE_URL}?guestId=${guest.id}`;
 
   if (msConfig && msConfig.clientId) {
       const token = await getGraphAccessToken(msConfig.clientId);

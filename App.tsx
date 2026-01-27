@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Guest, ViewState } from './types';
 import { EVENT_DETAILS, AWARD_SECTIONS } from './constants';
 import TicketView from './components/TicketView';
@@ -18,58 +18,89 @@ const App: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
+  
+  // Use ref to track view for async callbacks to avoid stale closures
+  const viewRef = useRef<ViewState>('HOME');
+  useEffect(() => { viewRef.current = view; }, [view]);
 
   // Load data from Supabase on mount
   useEffect(() => {
-    initApp();
-  }, []);
+    let authSubscription: any = null;
 
-  const initApp = async () => {
-    setIsLoading(true);
-    
-    // Auth Listener
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
+    const initApp = async () => {
+      setIsLoading(true);
+      
+      // 1. Immediate Session Check (Critical for OAuth Redirects)
+      const { data: { session: initialSession } } = await supabase.auth.getSession();
+      setSession(initialSession);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      // If user logs out while on a protected route, send them home or to login
-      if (!session && (view === 'ADMIN' || view === 'SCANNER')) {
-        setView('LOGIN');
+      // Handle OAuth Redirect landing immediately
+      if (initialSession) {
+         // If we have a hash with access_token, we just came from an OAuth redirect
+         if (window.location.hash && window.location.hash.includes('access_token')) {
+             console.log("OAuth Redirect detected - Cleaning URL");
+             window.history.replaceState(null, '', window.location.pathname);
+             setView('ADMIN');
+         } else if (view === 'LOGIN') {
+             // If we were on login page but have session, go to Admin
+             setView('ADMIN');
+         }
       }
-    });
 
-    try {
-      // 1. Fetch all guests
-      const data = await fetchAllGuests();
-      setGuests(data);
-
-      // 2. Check for Invitation/Pass Link (Deep Link)
-      const params = new URLSearchParams(window.location.search);
-      const guestId = params.get('guestId');
-
-      if (guestId) {
-        const targetGuest = data.find(g => g.id === guestId);
-        if (targetGuest) {
-          console.log("Found guest from link:", targetGuest);
-          setCurrentGuest(targetGuest);
-          setView('TICKET');
-          
-          // Optional: clear query params to clean up URL
-          window.history.replaceState({}, '', window.location.pathname);
-        } else {
-          console.warn("Guest ID from URL not found");
+      // 2. Auth State Listener
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        setSession(session);
+        
+        if (event === 'SIGNED_IN') {
+             // Handle late firing of SIGNED_IN (e.g. after hash parse)
+             if (window.location.hash && window.location.hash.includes('access_token')) {
+                 window.history.replaceState(null, '', window.location.pathname);
+                 setView('ADMIN');
+             } else if (viewRef.current === 'LOGIN') {
+                 setView('ADMIN');
+             }
         }
-      }
-    } catch (error) {
-      console.error("Failed to load guests:", error);
-    } finally {
-      setIsLoading(false);
-    }
 
-    return () => subscription.unsubscribe();
-  };
+        if (event === 'SIGNED_OUT') {
+           if (viewRef.current === 'ADMIN' || viewRef.current === 'SCANNER') {
+               setView('LOGIN');
+           }
+        }
+      });
+      authSubscription = data.subscription;
+
+      try {
+        // 3. Fetch all guests
+        const guestsData = await fetchAllGuests();
+        setGuests(guestsData);
+
+        // 4. Check for Invitation/Pass Link (Deep Link)
+        const params = new URLSearchParams(window.location.search);
+        const guestId = params.get('guestId');
+
+        if (guestId) {
+          const targetGuest = guestsData.find(g => g.id === guestId);
+          if (targetGuest) {
+            console.log("Found guest from link:", targetGuest);
+            setCurrentGuest(targetGuest);
+            setView('TICKET');
+            // Clean URL
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load guests:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initApp();
+
+    return () => {
+        if (authSubscription) authSubscription.unsubscribe();
+    };
+  }, []);
 
   const handleScan = (id: string) => {
     const guestIdx = guests.findIndex(g => g.id === id);
