@@ -1,14 +1,15 @@
 
-import React, { useEffect, useState } from 'react';
+// ... existing imports
+import React, { useEffect, useState, useMemo } from 'react';
 import { Guest, EmailTemplate, MicrosoftConfig } from '../types';
 import { INVITED_ORGANIZATIONS, DEFAULT_GUEST_CATEGORIES } from '../constants';
 import { getAdminInsights } from '../services/geminiService';
-import { createGuest, bulkCreateGuests, updateGuestInvitationStatus, updateGuest } from '../services/dataService';
+import { createGuest, bulkCreateGuests, updateGuestInvitationStatus, updateGuest, fetchCategories, createCategory, deleteCategory, seedCategories } from '../services/dataService';
 import { sendInvitationEmail, sendGuestConfirmationEmail } from '../services/emailService';
 import { signInWithMicrosoft, getActiveAccount, logoutMicrosoft, getGraphAccessToken, sendEmailViaGraph } from '../services/msGraphService';
 import { supabase } from '../services/supabaseClient';
-import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle, HelpCircle, Edit } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle, HelpCircle, Edit, TrendingUp, Calendar, UserCheck, Activity, Building, BarChart2 } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
 import TicketView from './TicketView';
 
@@ -30,9 +31,11 @@ const generateId = () => {
     });
 };
 
+const COLORS = ['#d4af37', '#10b981', '#3b82f6', '#8b5cf6', '#f43f5e', '#f97316'];
+
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, onDeleteGuest }) => {
   const [guests, setGuests] = useState<Guest[]>(initialGuests);
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'GUESTS' | 'ORGS'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'GUESTS' | 'STATS'>('OVERVIEW');
   const [insights, setInsights] = useState<string>('Generating attendance insights...');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -76,11 +79,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   const [testEmailTarget, setTestEmailTarget] = useState('cto@macl.aero');
   const [sendingTest, setSendingTest] = useState(false);
 
-  // Dynamic Categories
-  const [guestCategories, setGuestCategories] = useState<string[]>(() => {
-    const saved = localStorage.getItem('velana_guest_categories');
-    return saved ? JSON.parse(saved) : DEFAULT_GUEST_CATEGORIES;
-  });
+  // Dynamic Categories (Managed via Database)
+  const [guestCategories, setGuestCategories] = useState<string[]>(DEFAULT_GUEST_CATEGORIES);
   const [newCategory, setNewCategory] = useState('');
 
   const [emailTemplate, setEmailTemplate] = useState<EmailTemplate>(() => {
@@ -117,6 +117,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     }
   }, [msConfig.clientId, msConfig.tenantId]);
 
+  // Load Categories from DB
+  const loadCategories = async () => {
+    const cats = await fetchCategories();
+    if (cats.length > 0) {
+      setGuestCategories(cats);
+    } else {
+      setGuestCategories(DEFAULT_GUEST_CATEGORIES);
+    }
+  };
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
   useEffect(() => {
     const fetchInsights = async () => {
       if (guests.length > 0) {
@@ -127,6 +141,85 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
       }
     };
     fetchInsights();
+  }, [guests]);
+
+  // --- Statistics & Chart Data Calculations ---
+  
+  const stats = useMemo(() => {
+    const total = guests.length;
+    const invited = guests.filter(g => g.invitationSent).length;
+    const rsvp = guests.filter(g => g.rsvpConfirmed).length;
+    const checkedIn = guests.filter(g => g.checkedIn).length;
+    
+    return { total, invited, rsvp, checkedIn };
+  }, [guests]);
+
+  const timelineData = useMemo(() => {
+    const dateMap = new Map<string, { date: string; rsvp: number; invited: number }>();
+    
+    guests.forEach(g => {
+        // RSVP Date Grouping
+        const rsvpDate = g.rsvpDate ? g.rsvpDate.split('T')[0] : 'Unknown';
+        if (rsvpDate !== 'Unknown') {
+            if (!dateMap.has(rsvpDate)) dateMap.set(rsvpDate, { date: rsvpDate, rsvp: 0, invited: 0 });
+            dateMap.get(rsvpDate)!.rsvp += 1;
+        }
+
+        // Invitation Date Grouping
+        if (g.invitationSentAt) {
+            const inviteDate = g.invitationSentAt.split('T')[0];
+            if (!dateMap.has(inviteDate)) dateMap.set(inviteDate, { date: inviteDate, rsvp: 0, invited: 0 });
+            dateMap.get(inviteDate)!.invited += 1;
+        }
+    });
+
+    return Array.from(dateMap.values())
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-14); // Last 14 days of activity
+  }, [guests]);
+
+  const orgChartData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    guests.forEach(g => {
+        const org = g.organization || 'Unknown';
+        counts[org] = (counts[org] || 0) + 1;
+    });
+    
+    return Object.entries(counts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 7); // Top 7 Organizations
+  }, [guests]);
+
+  // Detailed Stats for STATS tab
+  const detailedOrgStats = useMemo(() => {
+    const stats: Record<string, { name: string, total: number, invited: number, rsvp: number, checkedIn: number }> = {};
+    
+    guests.forEach(g => {
+        // Normalize organization name
+        const org = g.organization ? g.organization.trim() : 'Unknown';
+        if (!stats[org]) {
+            stats[org] = { name: org, total: 0, invited: 0, rsvp: 0, checkedIn: 0 };
+        }
+        stats[org].total++;
+        if (g.invitationSent) stats[org].invited++;
+        if (g.rsvpConfirmed) stats[org].rsvp++;
+        if (g.checkedIn) stats[org].checkedIn++;
+    });
+
+    return Object.values(stats).sort((a, b) => b.total - a.total);
+  }, [guests]);
+
+  const recentActivity = useMemo(() => {
+      // Combine RSVPs and Check-ins into a unified timeline
+      const activities = [];
+      guests.forEach(g => {
+          if (g.rsvpConfirmed) activities.push({ type: 'RSVP', guest: g, time: g.rsvpDate });
+          if (g.checkedIn && g.checkInTime) activities.push({ type: 'CHECKIN', guest: g, time: g.checkInTime });
+      });
+      return activities
+        .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+        .slice(0, 5);
   }, [guests]);
 
   // Auto-dismiss notification
@@ -208,35 +301,49 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     }
   };
 
-  const handleAddCategory = () => {
-    if (newCategory.trim() && !guestCategories.includes(newCategory.trim())) {
-      const updated = [...guestCategories, newCategory.trim()];
-      setGuestCategories(updated);
-      localStorage.setItem('velana_guest_categories', JSON.stringify(updated));
-      setNewCategory('');
+  const handleAddCategory = async () => {
+    if (newCategory.trim()) {
+      try {
+         await createCategory(newCategory.trim());
+         setNewCategory('');
+         await loadCategories();
+         setNotification({ type: 'success', message: 'Category added to database.' });
+      } catch (e: any) {
+         console.error(e);
+         setNotification({ type: 'error', message: 'Failed to add category. Please check if table exists.' });
+      }
     }
   };
 
-  const handleRemoveCategory = (cat: string) => {
+  const handleRemoveCategory = async (cat: string) => {
     if (cat === "Not an Award Recipient") {
       alert("Cannot remove the default system category.");
       return;
     }
-    if (confirm(`Remove category "${cat}"?`)) {
-      const updated = guestCategories.filter(c => c !== cat);
-      setGuestCategories(updated);
-      localStorage.setItem('velana_guest_categories', JSON.stringify(updated));
+    if (confirm(`Delete category "${cat}" from database?`)) {
+      try {
+        await deleteCategory(cat);
+        await loadCategories();
+        setNotification({ type: 'success', message: 'Category removed.' });
+      } catch (e: any) {
+        console.error(e);
+        setNotification({ type: 'error', message: 'Failed to delete category.' });
+      }
     }
   };
 
-  const handleResetCategories = () => {
-    if (confirm("Reset all categories to system defaults? This will remove custom categories.")) {
-      setGuestCategories(DEFAULT_GUEST_CATEGORIES);
-      localStorage.setItem('velana_guest_categories', JSON.stringify(DEFAULT_GUEST_CATEGORIES));
+  const handleResetCategories = async () => {
+    if (confirm("Populate database with default system categories? Existing custom categories will remain.")) {
+       try {
+          await seedCategories();
+          await loadCategories();
+          setNotification({ type: 'success', message: 'Default categories seeded.' });
+       } catch (e: any) {
+          console.error(e);
+          setNotification({ type: 'error', message: 'Failed to seed categories.' });
+       }
     }
   };
-
-  const checkedInCount = guests.filter(g => g.checkedIn).length;
   
   // Selection Logic
   const toggleSelectAll = () => {
@@ -442,20 +549,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     }
   };
 
-  // Organization Analysis
-  const orgStats = INVITED_ORGANIZATIONS.map(orgName => {
-    const orgGuests = guests.filter(g => 
-      g.organization.toLowerCase().includes(orgName.toLowerCase()) || 
-      orgName.toLowerCase().includes(g.organization.toLowerCase())
-    );
-    return {
-      name: orgName,
-      rsvpCount: orgGuests.length,
-      checkedInCount: orgGuests.filter(g => g.checkedIn).length,
-      status: orgGuests.length > 0 ? 'Active' : 'No Response'
-    };
-  });
-
   const filteredGuests = guests.filter(g => 
     g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     g.organization.toLowerCase().includes(searchQuery.toLowerCase())
@@ -480,7 +573,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
           <p className="text-zinc-400">Live guest tracking for Velana Awards</p>
         </div>
         <div className="flex gap-2">
-          {['OVERVIEW', 'GUESTS', 'ORGS'].map((tab) => (
+          {['OVERVIEW', 'GUESTS', 'STATS'].map((tab) => (
              <button 
              key={tab}
              onClick={() => setActiveTab(tab as any)}
@@ -620,7 +713,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                       <div className="flex justify-between items-end mb-3">
                          <label className="block text-xs font-bold text-zinc-500 uppercase">Active Categories</label>
                          <button onClick={handleResetCategories} className="text-xs text-yellow-500 hover:text-yellow-400 flex items-center gap-1">
-                           <RotateCcw size={12} /> Reset to Defaults
+                           <RotateCcw size={12} /> Seed Defaults
                          </button>
                       </div>
                       <div className="space-y-2">
@@ -1004,30 +1097,270 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
 
       {activeTab === 'OVERVIEW' && (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-zinc-400 text-sm">Total RSVPs</span>
-                <Users className="text-zinc-600" size={20} />
+           {/* Detailed KPIs */}
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+             <div className="bg-zinc-900/80 p-6 rounded-2xl border border-zinc-800 shadow-xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                   <Users size={64} className="text-zinc-500" />
+                </div>
+                <div className="relative z-10">
+                   <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-1">Total Guests</p>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl font-bold text-white">{stats.total}</span>
+                     <span className="text-xs text-green-500 bg-green-900/20 px-1.5 py-0.5 rounded font-bold">+100%</span>
+                   </div>
+                   <p className="text-[10px] text-zinc-400 mt-2">Registered in system</p>
+                </div>
+             </div>
+
+             <div className="bg-zinc-900/80 p-6 rounded-2xl border border-zinc-800 shadow-xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                   <Mail size={64} className="text-blue-500" />
+                </div>
+                <div className="relative z-10">
+                   <p className="text-xs font-bold text-blue-500 uppercase tracking-widest mb-1">Invitations Sent</p>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl font-bold text-white">{stats.invited}</span>
+                     <span className="text-xs text-zinc-500">of {stats.total}</span>
+                   </div>
+                   <div className="w-full bg-zinc-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                      <div className="bg-blue-600 h-full rounded-full" style={{ width: `${(stats.invited / Math.max(stats.total, 1)) * 100}%` }}></div>
+                   </div>
+                </div>
+             </div>
+
+             <div className="bg-zinc-900/80 p-6 rounded-2xl border border-zinc-800 shadow-xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                   <CheckCircle size={64} className="text-yellow-500" />
+                </div>
+                <div className="relative z-10">
+                   <p className="text-xs font-bold text-yellow-500 uppercase tracking-widest mb-1">RSVP Confirmed</p>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl font-bold text-white">{stats.rsvp}</span>
+                     <span className="text-xs text-zinc-500">{((stats.rsvp / Math.max(stats.invited, 1)) * 100).toFixed(0)}% Rate</span>
+                   </div>
+                   <div className="w-full bg-zinc-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                      <div className="bg-yellow-500 h-full rounded-full" style={{ width: `${(stats.rsvp / Math.max(stats.invited, 1)) * 100}%` }}></div>
+                   </div>
+                </div>
+             </div>
+
+             <div className="bg-zinc-900/80 p-6 rounded-2xl border border-zinc-800 shadow-xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                   <UserCheck size={64} className="text-green-500" />
+                </div>
+                <div className="relative z-10">
+                   <p className="text-xs font-bold text-green-500 uppercase tracking-widest mb-1">Total Arrived</p>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl font-bold text-white">{stats.checkedIn}</span>
+                   </div>
+                   <p className="text-[10px] text-zinc-400 mt-2">Checked in at venue</p>
+                   <div className="w-full bg-zinc-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                      <div className="bg-green-600 h-full rounded-full" style={{ width: `${(stats.checkedIn / Math.max(stats.rsvp, 1)) * 100}%` }}></div>
+                   </div>
+                </div>
+             </div>
+           </div>
+
+           {/* Charts Row 1: Timeline & Distribution */}
+           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 shadow-lg">
+                 <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-bold text-white flex items-center gap-2">
+                       <TrendingUp size={18} className="text-yellow-500"/> Activity Timeline
+                    </h3>
+                    <div className="flex gap-2 text-xs">
+                        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-yellow-500"></div> RSVP</div>
+                        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Invited</div>
+                    </div>
+                 </div>
+                 <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={timelineData}>
+                            <defs>
+                                <linearGradient id="colorRsvp" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#d4af37" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#d4af37" stopOpacity={0}/>
+                                </linearGradient>
+                                <linearGradient id="colorInvited" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                            <XAxis dataKey="date" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+                            <Tooltip 
+                                contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', color: '#fff' }}
+                                itemStyle={{ fontSize: '12px' }}
+                            />
+                            <Area type="monotone" dataKey="invited" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorInvited)" name="Invited" />
+                            <Area type="monotone" dataKey="rsvp" stroke="#d4af37" strokeWidth={2} fillOpacity={1} fill="url(#colorRsvp)" name="RSVP" />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                 </div>
               </div>
-              <div className="text-4xl font-bold">{guests.length}</div>
-            </div>
-            
-            <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-zinc-400 text-sm">Checked In</span>
-                <CheckCircle className="text-green-600" size={20} />
+
+              <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 shadow-lg flex flex-col">
+                 <h3 className="font-bold text-white flex items-center gap-2 mb-6">
+                    <Activity size={18} className="text-green-500"/> Guest Funnel
+                 </h3>
+                 <div className="flex-1 flex flex-col justify-center space-y-6">
+                    <div className="relative pt-6">
+                        <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-zinc-800"></div>
+                        
+                        <div className="relative pl-10 space-y-1 mb-8">
+                             <div className="absolute left-2.5 top-1.5 w-3 h-3 rounded-full bg-zinc-600 border-2 border-zinc-900 -translate-x-1/2"></div>
+                             <p className="text-xs text-zinc-500 uppercase font-bold">Total Guests</p>
+                             <p className="text-xl font-bold text-white">{stats.total}</p>
+                        </div>
+                        
+                        <div className="relative pl-10 space-y-1 mb-8">
+                             <div className="absolute left-2.5 top-1.5 w-3 h-3 rounded-full bg-blue-500 border-2 border-zinc-900 -translate-x-1/2"></div>
+                             <p className="text-xs text-blue-500 uppercase font-bold">Invitations Sent</p>
+                             <p className="text-xl font-bold text-white">{stats.invited}</p>
+                             <p className="text-[10px] text-zinc-500">{(stats.invited/stats.total*100).toFixed(0)}% Coverage</p>
+                        </div>
+
+                        <div className="relative pl-10 space-y-1 mb-8">
+                             <div className="absolute left-2.5 top-1.5 w-3 h-3 rounded-full bg-yellow-500 border-2 border-zinc-900 -translate-x-1/2"></div>
+                             <p className="text-xs text-yellow-500 uppercase font-bold">Confirmed RSVP</p>
+                             <p className="text-xl font-bold text-white">{stats.rsvp}</p>
+                             <p className="text-[10px] text-zinc-500">{(stats.rsvp/stats.invited*100).toFixed(0)}% Response Rate</p>
+                        </div>
+
+                        <div className="relative pl-10 space-y-1">
+                             <div className="absolute left-2.5 top-1.5 w-3 h-3 rounded-full bg-green-500 border-2 border-zinc-900 -translate-x-1/2"></div>
+                             <p className="text-xs text-green-500 uppercase font-bold">Arrived</p>
+                             <p className="text-xl font-bold text-white">{stats.checkedIn}</p>
+                        </div>
+                    </div>
+                 </div>
               </div>
-              <div className="text-4xl font-bold text-green-500">{checkedInCount}</div>
+           </div>
+
+           {/* Charts Row 2: Organization Stats & AI Insights */}
+           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 shadow-lg">
+                 <h3 className="font-bold text-white flex items-center gap-2 mb-6">
+                    <Building size={18} className="text-purple-500"/> Top Organizations
+                 </h3>
+                 <div className="h-[250px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={orgChartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" horizontal={true} vertical={false} />
+                            <XAxis type="number" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} hide />
+                            <YAxis dataKey="name" type="category" width={120} stroke="#a1a1aa" fontSize={11} tickLine={false} axisLine={false} />
+                            <Tooltip 
+                                cursor={{fill: '#27272a', opacity: 0.4}}
+                                contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', color: '#fff' }}
+                            />
+                            <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={20} name="Guests" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                 </div>
+              </div>
+
+              <div className="space-y-6">
+                 {/* Live Feed */}
+                 <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800 shadow-lg">
+                     <h3 className="font-bold text-white flex items-center gap-2 mb-4">
+                        <Activity size={18} className="text-red-500 animate-pulse"/> Live Activity
+                     </h3>
+                     <div className="space-y-4">
+                        {recentActivity.length === 0 ? (
+                            <p className="text-sm text-zinc-500 italic">No recent activity.</p>
+                        ) : (
+                            recentActivity.map((act, i) => (
+                                <div key={i} className="flex items-start gap-3 text-sm">
+                                    <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${act.type === 'CHECKIN' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-white truncate">
+                                            <span className="font-bold">{act.guest.name}</span>
+                                            <span className="text-zinc-500"> • {act.type === 'CHECKIN' ? 'Checked In' : 'RSVP Confirmed'}</span>
+                                        </p>
+                                        <p className="text-[10px] text-zinc-500">{new Date(act.time).toLocaleTimeString()}</p>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                     </div>
+                 </div>
+
+                 {/* AI Insights (Compact) */}
+                 <div className="bg-gradient-to-br from-zinc-900 to-zinc-800 p-6 rounded-2xl border border-zinc-700 shadow-lg">
+                    <div className="flex items-center gap-2 text-yellow-500 text-sm font-bold uppercase tracking-widest mb-3">
+                        <Sparkles size={14} /> AI Analysis
+                    </div>
+                    <p className="text-sm text-zinc-300 leading-relaxed italic border-l-2 border-yellow-500/30 pl-3">
+                        {insights}
+                    </p>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {activeTab === 'STATS' && (
+        <div className="space-y-6 animate-in fade-in">
+            {/* Chart Section */}
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-6 shadow-xl">
+                <h3 className="font-bold text-white mb-6 flex items-center gap-2">
+                    <Building size={20} className="text-yellow-500" /> Organization Engagement
+                </h3>
+                <div className="h-[400px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={detailedOrgStats.slice(0, 10)} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                            <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+                            <Tooltip 
+                                cursor={{fill: '#27272a', opacity: 0.4}}
+                                contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', color: '#fff' }}
+                            />
+                            <Legend />
+                            <Bar dataKey="invited" name="Invited" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="rsvp" name="RSVP" fill="#eab308" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="checkedIn" name="Checked In" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
             </div>
 
-            <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800/50 flex flex-col justify-center">
-              <div className="flex items-center gap-2 text-zinc-400 text-sm mb-2 italic">
-                <Sparkles size={14} className="text-yellow-500" /> AI Insights
-              </div>
-              <p className="text-sm text-zinc-300 leading-relaxed">{insights}</p>
+            {/* Table Section */}
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden shadow-xl">
+                <div className="p-6 border-b border-zinc-800">
+                    <h3 className="font-bold text-white">Detailed Breakdown</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-zinc-800/50 text-zinc-400 font-medium">
+                            <tr>
+                                <th className="px-6 py-4">Organization</th>
+                                <th className="px-6 py-4 text-center">Total Guests</th>
+                                <th className="px-6 py-4 text-center text-blue-500">Invited</th>
+                                <th className="px-6 py-4 text-center text-yellow-500">RSVP</th>
+                                <th className="px-6 py-4 text-center text-green-500">Checked In</th>
+                                <th className="px-6 py-4 text-right">Yield</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-800">
+                            {detailedOrgStats.map((stat, i) => (
+                                <tr key={i} className="hover:bg-zinc-800/30 transition-colors">
+                                    <td className="px-6 py-4 font-medium text-white">{stat.name}</td>
+                                    <td className="px-6 py-4 text-center">{stat.total}</td>
+                                    <td className="px-6 py-4 text-center text-zinc-300">{stat.invited}</td>
+                                    <td className="px-6 py-4 text-center text-zinc-300">{stat.rsvp}</td>
+                                    <td className="px-6 py-4 text-center text-zinc-300">{stat.checkedIn}</td>
+                                    <td className="px-6 py-4 text-right text-zinc-400">
+                                        {stat.invited > 0 ? ((stat.checkedIn / stat.invited) * 100).toFixed(0) : 0}%
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-          </div>
         </div>
       )}
 
@@ -1114,7 +1447,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                           <div className="flex items-center gap-2">
                             {guest.invitationSent ? (
                               <span className="flex items-center gap-1.5 text-xs text-green-400 bg-green-900/20 px-2 py-0.5 rounded-md border border-green-900/30 font-bold uppercase tracking-wider">
-                                  <CheckCircle size={12} /> Invited
+                                  <CheckCircle size={12} /> INVITED
                               </span>
                             ) : (
                               <span className="flex items-center gap-1.5 text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-md uppercase tracking-wider">

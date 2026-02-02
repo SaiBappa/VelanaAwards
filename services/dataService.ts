@@ -1,9 +1,10 @@
 
 import { supabase } from './supabaseClient';
 import { Guest } from '../types';
+import { DEFAULT_GUEST_CATEGORIES } from '../constants';
 
 // Map database snake_case columns to TypeScript camelCase properties
-const mapToGuest = (row: any): Guest => ({
+export const mapToGuest = (row: any): Guest => ({
   id: row.id,
   name: row.name,
   email: row.email,
@@ -160,4 +161,47 @@ export const removeGuest = async (id: string): Promise<void> => {
     console.error('Error deleting guest:', error);
     throw error;
   }
+};
+
+// --- Category Management ---
+
+export const fetchCategories = async (): Promise<string[]> => {
+  const { data, error } = await supabase
+    .from('guest_categories')
+    .select('name')
+    .order('name');
+  
+  if (error) {
+    // Fail gracefully if table doesn't exist yet, return null to let UI handle defaults
+    console.warn('Could not fetch categories (table might be missing):', error.message);
+    return [];
+  }
+  return data ? data.map((c: any) => c.name) : [];
+};
+
+export const createCategory = async (name: string): Promise<void> => {
+  const { error } = await supabase
+    .from('guest_categories')
+    .insert([{ name }]);
+  
+  if (error) throw error;
+};
+
+export const deleteCategory = async (name: string): Promise<void> => {
+  const { error } = await supabase
+    .from('guest_categories')
+    .delete()
+    .eq('name', name);
+    
+  if (error) throw error;
+};
+
+export const seedCategories = async (): Promise<void> => {
+  // Upsert default categories
+  const payload = DEFAULT_GUEST_CATEGORIES.map(name => ({ name }));
+  const { error } = await supabase
+    .from('guest_categories')
+    .upsert(payload, { onConflict: 'name', ignoreDuplicates: true });
+
+  if (error) throw error;
 };

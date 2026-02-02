@@ -6,13 +6,13 @@ import TicketView from './components/TicketView';
 import AdminDashboard from './components/AdminDashboard';
 import QRScanner from './components/QRScanner';
 import LoginForm from './components/LoginForm';
-import { fetchAllGuests, updateGuestCheckIn, removeGuest, confirmGuestRSVP } from './services/dataService';
+import { fetchAllGuests, updateGuestCheckIn, removeGuest, confirmGuestRSVP, mapToGuest } from './services/dataService';
 import { supabase } from './services/supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import { Calendar, UserCheck, ShieldCheck, Home, ArrowRight, Menu, X, Plane, MapPin, Award, Box, Coffee, Trophy, ExternalLink, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [view, setView] = useState<ViewState>('HOME');
+  const [view, setView] = useState<ViewState>('LOGIN'); // Default to LOGIN for security
   const [guests, setGuests] = useState<Guest[]>([]);
   const [currentGuest, setCurrentGuest] = useState<Guest | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -20,95 +20,129 @@ const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   
   // Use ref to track view for async callbacks to avoid stale closures
-  const viewRef = useRef<ViewState>('HOME');
+  const viewRef = useRef<ViewState>('LOGIN');
   useEffect(() => { viewRef.current = view; }, [view]);
 
   // Load data from Supabase on mount
   useEffect(() => {
     let authSubscription: any = null;
+    let realtimeChannel: any = null;
 
     const initApp = async () => {
       setIsLoading(true);
       
-      // 1. Immediate Session Check (Critical for OAuth Redirects)
+      // 1. Immediate Session Check
       const { data: { session: initialSession } } = await supabase.auth.getSession();
       setSession(initialSession);
 
-      // Handle OAuth Redirect landing immediately
-      if (initialSession) {
-         // If we have a hash with access_token, we just came from an OAuth redirect
-         if (window.location.hash && window.location.hash.includes('access_token')) {
+      // 2. Check Deep Link (Guest Pass)
+      const params = new URLSearchParams(window.location.search);
+      const guestId = params.get('guestId');
+
+      if (guestId) {
+          // Public Access: Ticket View via ID
+          try {
+             const guestsData = await fetchAllGuests();
+             setGuests(guestsData);
+             
+             const targetGuest = guestsData.find(g => g.id === guestId);
+             if (targetGuest) {
+               console.log("Found guest from link:", targetGuest);
+               
+               // Automatically confirm RSVP if they visited the link
+               if (!targetGuest.rsvpConfirmed) {
+                   confirmGuestRSVP(targetGuest.id).then(() => {
+                       console.log("RSVP Confirmed for", targetGuest.name);
+                   }).catch(err => console.error("Failed to confirm RSVP", err));
+                   targetGuest.rsvpConfirmed = true; 
+               }
+
+               setCurrentGuest(targetGuest);
+               setView('TICKET');
+               // Clean URL
+               window.history.replaceState({}, '', window.location.pathname);
+             } else {
+               // Invalid ID - Force Login
+               setView('LOGIN');
+             }
+          } catch (error) {
+             console.error("Failed to load guests for ticket:", error);
+             setView('LOGIN');
+          }
+      } else if (initialSession) {
+          // Authenticated Access
+          try {
+             const guestsData = await fetchAllGuests();
+             setGuests(guestsData);
+          } catch (error) {
+             console.error("Failed to load guests:", error);
+          }
+
+          // Handle OAuth Redirect landing
+          if (window.location.hash && window.location.hash.includes('access_token')) {
              console.log("OAuth Redirect detected - Cleaning URL");
              window.history.replaceState(null, '', window.location.pathname);
              setView('ADMIN');
-         } else if (view === 'LOGIN') {
-             // If we were on login page but have session, go to Admin
-             setView('ADMIN');
-         }
+          } else {
+             // Default authenticated view
+             setView('HOME');
+          }
+      } else {
+          // Unauthenticated -> Force Login
+          setView('LOGIN');
       }
 
-      // 2. Auth State Listener
-      const { data } = supabase.auth.onAuthStateChange((event, session) => {
-        setSession(session);
-        
-        if (event === 'SIGNED_IN') {
-             // Handle late firing of SIGNED_IN (e.g. after hash parse)
-             if (window.location.hash && window.location.hash.includes('access_token')) {
-                 window.history.replaceState(null, '', window.location.pathname);
-                 setView('ADMIN');
-             } else if (viewRef.current === 'LOGIN') {
-                 setView('ADMIN');
-             }
-        }
+      setIsLoading(false);
+    };
 
-        if (event === 'SIGNED_OUT') {
-           if (viewRef.current === 'ADMIN' || viewRef.current === 'SCANNER') {
+    // 3. Auth State Listener
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      setSession(session);
+      
+      if (event === 'SIGNED_IN') {
+           // If we were on login page, go to Home or Admin
+           if (viewRef.current === 'LOGIN') {
+               setView('HOME');
+               // Fetch data if we haven't already
+               fetchAllGuests().then(setGuests).catch(console.error);
+           }
+      }
+
+      if (event === 'SIGNED_OUT') {
+           // If logged out, force Login view unless viewing a ticket
+           if (viewRef.current !== 'TICKET') {
                setView('LOGIN');
            }
-        }
-      });
-      authSubscription = data.subscription;
+      }
+    });
+    authSubscription = data.subscription;
 
-      try {
-        // 3. Fetch all guests
-        const guestsData = await fetchAllGuests();
-        setGuests(guestsData);
-
-        // 4. Check for Invitation/Pass Link (Deep Link)
-        const params = new URLSearchParams(window.location.search);
-        const guestId = params.get('guestId');
-
-        if (guestId) {
-          const targetGuest = guestsData.find(g => g.id === guestId);
-          if (targetGuest) {
-            console.log("Found guest from link:", targetGuest);
-            
-            // Automatically confirm RSVP if they visited the link
-            if (!targetGuest.rsvpConfirmed) {
-                confirmGuestRSVP(targetGuest.id).then(() => {
-                    console.log("RSVP Confirmed for", targetGuest.name);
-                }).catch(err => console.error("Failed to confirm RSVP", err));
-                // Optimistic update
-                targetGuest.rsvpConfirmed = true; 
-            }
-
-            setCurrentGuest(targetGuest);
-            setView('TICKET');
-            // Clean URL
-            window.history.replaceState({}, '', window.location.pathname);
+    // 4. Real-time Data Subscription
+    realtimeChannel = supabase
+      .channel('guests-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'guests' },
+        (payload) => {
+          // console.log('Realtime update:', payload);
+          if (payload.eventType === 'INSERT') {
+             const newGuest = mapToGuest(payload.new);
+             setGuests(prev => [newGuest, ...prev]);
+          } else if (payload.eventType === 'UPDATE') {
+             const updatedGuest = mapToGuest(payload.new);
+             setGuests(prev => prev.map(g => g.id === updatedGuest.id ? updatedGuest : g));
+          } else if (payload.eventType === 'DELETE') {
+             setGuests(prev => prev.filter(g => g.id !== payload.old.id));
           }
         }
-      } catch (error) {
-        console.error("Failed to load guests:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      )
+      .subscribe();
 
     initApp();
 
     return () => {
         if (authSubscription) authSubscription.unsubscribe();
+        if (realtimeChannel) supabase.removeChannel(realtimeChannel);
     };
   }, []);
 
@@ -126,7 +160,8 @@ const App: React.FC = () => {
 
     // Update DB
     updateGuestCheckIn(id).then((timestamp) => {
-       // Update local state to reflect change immediately
+       // Note: Real-time subscription will update state, but we also do it optimistically here 
+       // to ensure immediate feedback in the UI scanner.
        const updatedGuests = [...guests];
        updatedGuests[guestIdx] = { 
          ...guest, 
@@ -149,7 +184,8 @@ const App: React.FC = () => {
     if (confirm("Are you sure you want to remove this guest? This action cannot be undone.")) {
       try {
         await removeGuest(id);
-        setGuests(prev => prev.filter(g => g.id !== id));
+        // State update handled by Real-time subscription, 
+        // but can do optimistic update here if desired.
       } catch (e) {
         alert("Failed to delete guest from database.");
       }
@@ -157,12 +193,19 @@ const App: React.FC = () => {
   };
 
   const handleViewChange = (target: ViewState) => {
-    // Protect Routes
-    if ((target === 'ADMIN' || target === 'SCANNER') && !session) {
-      setView('LOGIN');
-    } else {
-      setView(target);
+    // TICKET view is allowed if set (usually via initApp)
+    if (target === 'TICKET') {
+        setView(target);
+        return;
     }
+
+    // Require Session for everything else
+    if (!session && target !== 'LOGIN') {
+      setView('LOGIN');
+      return;
+    }
+
+    setView(target);
     setIsMenuOpen(false);
   };
 
@@ -193,12 +236,12 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-yellow-500/30">
-      {/* Navigation */}
+      {/* Navigation - Only visible if logged in OR viewing a ticket (but limited) */}
       <nav className="sticky top-0 z-40 bg-black/80 backdrop-blur-md border-b border-zinc-800">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div 
-            className="flex items-center gap-2 cursor-pointer group"
-            onClick={() => setView('HOME')}
+            className={`flex items-center gap-2 group ${session ? 'cursor-pointer' : ''}`}
+            onClick={() => session && setView('HOME')}
           >
             <div className="w-10 h-10 bg-zinc-900 rounded-lg border border-zinc-700 flex items-center justify-center group-hover:border-yellow-600 transition-colors">
               <span className="serif text-xl font-bold gold-text">V</span>
@@ -209,22 +252,28 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-2">
-            <NavItem target="HOME" icon={Home} label="Home" />
-            <NavItem target="CATEGORIES" icon={Award} label="Awards" />
-          </div>
+          {/* Desktop Nav - Only show if logged in */}
+          {session && (
+            <div className="hidden md:flex items-center gap-2">
+                <NavItem target="HOME" icon={Home} label="Home" />
+                <NavItem target="CATEGORIES" icon={Award} label="Awards" />
+            </div>
+          )}
 
           <div className="flex items-center gap-4">
              {/* Admin / Login Button */}
-             <button
-                onClick={() => handleViewChange('ADMIN')}
-                className={`flex items-center gap-2 text-sm font-medium transition-colors ${
-                  view === 'ADMIN' || view === 'LOGIN' ? 'text-yellow-500' : 'text-zinc-400 hover:text-white'
-                }`}
-             >
-                <ShieldCheck size={18} />
-                <span className="hidden sm:inline">{session ? 'Dashboard' : 'Login'}</span>
-             </button>
+             {/* If not logged in and not on Ticket view (i.e. on Login view), hide this redundant button */}
+             { (session || view !== 'LOGIN') && (
+                 <button
+                    onClick={() => handleViewChange(session ? 'ADMIN' : 'LOGIN')}
+                    className={`flex items-center gap-2 text-sm font-medium transition-colors ${
+                    view === 'ADMIN' || view === 'LOGIN' ? 'text-yellow-500' : 'text-zinc-400 hover:text-white'
+                    }`}
+                >
+                    <ShieldCheck size={18} />
+                    <span className="hidden sm:inline">{session ? 'Dashboard' : 'Login'}</span>
+                </button>
+             )}
 
              {session && (
                <button 
@@ -235,28 +284,31 @@ const App: React.FC = () => {
                 <span className="hidden sm:inline">Check-In</span>
               </button>
              )}
-            <button 
-              className="md:hidden text-zinc-400"
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-            >
-              {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
-            </button>
+            
+            {session && (
+                <button 
+                className="md:hidden text-zinc-400"
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                >
+                {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+                </button>
+            )}
           </div>
         </div>
 
         {/* Mobile Menu */}
-        {isMenuOpen && (
+        {isMenuOpen && session && (
           <div className="md:hidden absolute top-full left-0 w-full bg-zinc-900 border-b border-zinc-800 py-4 animate-in slide-in-from-top duration-300">
             <NavItem target="HOME" icon={Home} label="Home" />
             <NavItem target="CATEGORIES" icon={Award} label="Awards" />
-            <NavItem target="ADMIN" icon={ShieldCheck} label={session ? "Dashboard" : "Login"} />
+            <NavItem target="ADMIN" icon={ShieldCheck} label="Dashboard" />
           </div>
         )}
       </nav>
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto px-6 py-12 w-full">
-        {view === 'HOME' && (
+        {view === 'HOME' && session && (
           <div className="space-y-16 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <section className="text-center space-y-6 pt-12">
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-bold text-zinc-400 uppercase tracking-widest">
@@ -369,7 +421,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {view === 'CATEGORIES' && (
+        {view === 'CATEGORIES' && session && (
           <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4">
              <header className="text-center space-y-4 py-8">
                 <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-bold text-zinc-400 uppercase tracking-widest">
@@ -414,7 +466,7 @@ const App: React.FC = () => {
         )}
 
         {view === 'LOGIN' && (
-           <LoginForm onSuccess={() => setView('ADMIN')} />
+           <LoginForm onSuccess={() => setView('HOME')} />
         )}
 
         {view === 'TICKET' && currentGuest && (
