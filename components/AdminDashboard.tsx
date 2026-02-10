@@ -1,14 +1,14 @@
 
 // ... existing imports
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Guest, EmailTemplate, MicrosoftConfig } from '../types';
 import { INVITED_ORGANIZATIONS, DEFAULT_GUEST_CATEGORIES } from '../constants';
 import { getAdminInsights } from '../services/geminiService';
-import { createGuest, bulkCreateGuests, updateGuestInvitationStatus, updateGuest, fetchCategories, createCategory, deleteCategory, seedCategories } from '../services/dataService';
+import { createGuest, bulkCreateGuests, updateGuestInvitationStatus, updateGuest, fetchCategories, createCategory, deleteCategory, seedCategories, fetchEmailTemplate, saveEmailTemplate as saveEmailTemplateToDb } from '../services/dataService';
 import { sendInvitationEmail, sendGuestConfirmationEmail } from '../services/emailService';
 import { signInWithMicrosoft, getActiveAccount, logoutMicrosoft, getGraphAccessToken, sendEmailViaGraph } from '../services/msGraphService';
 import { supabase } from '../services/supabaseClient';
-import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle, HelpCircle, Edit, TrendingUp, Calendar, UserCheck, Activity, Building, BarChart2 } from 'lucide-react';
+import { Users, CheckCircle, Sparkles, Search, Trash2, Download, PieChart as PieIcon, ListX, Plus, Upload, FileSpreadsheet, X, Save, AlertCircle, Mail, Send, Settings, CheckSquare, Square, RefreshCcw, MinusCircle, LayoutList, RotateCcw, QrCode, Link as LinkIcon, LogOut, ExternalLink, ArrowRight, Check, PlayCircle, HelpCircle, Edit, TrendingUp, Calendar, UserCheck, Activity, Building, BarChart2, Bold, Italic, Underline, Type, AlignLeft, List, Loader2 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
 import TicketView from './TicketView';
@@ -32,6 +32,12 @@ const generateId = () => {
 };
 
 const COLORS = ['#d4af37', '#10b981', '#3b82f6', '#8b5cf6', '#f43f5e', '#f97316'];
+
+const DEFAULT_EMAIL_TEMPLATE: EmailTemplate = {
+  subject: "You are invited: Velana Awards 2026",
+  imageUrl: "https://images.unsplash.com/photo-1540206351-d6465b3ac5c1?q=80&w=2832",
+  body: "<p>Dear {name},</p><p>We are honored to invite you to the Velana Awards 2026. Join us for a night of celebration at Crossroads Maldives.</p><p>Please confirm your attendance by clicking the button below.</p>"
+};
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, onDeleteGuest }) => {
   const [guests, setGuests] = useState<Guest[]>(initialGuests);
@@ -59,6 +65,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   const [sendingEmail, setSendingEmail] = useState(false);
   const [showEmailPreview, setShowEmailPreview] = useState(false);
   const [pendingRecipientIds, setPendingRecipientIds] = useState<string[]>([]);
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
 
   // Ticket Viewer State
   const [viewTicketGuest, setViewTicketGuest] = useState<Guest | null>(null);
@@ -83,15 +90,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
   const [guestCategories, setGuestCategories] = useState<string[]>(DEFAULT_GUEST_CATEGORIES);
   const [newCategory, setNewCategory] = useState('');
 
-  const [emailTemplate, setEmailTemplate] = useState<EmailTemplate>(() => {
-    // Load from local storage if available
-    const saved = localStorage.getItem('velana_email_template');
-    return saved ? JSON.parse(saved) : {
-      subject: "You are invited: Velana Awards 2026",
-      imageUrl: "https://images.unsplash.com/photo-1540206351-d6465b3ac5c1?q=80&w=2832",
-      body: "Dear {name},\n\nWe are honored to invite you to the Velana Awards 2026. Join us for a night of celebration at Crossroads Maldives.\n\nPlease confirm your attendance by clicking the button below."
-    };
-  });
+  const [emailTemplate, setEmailTemplate] = useState<EmailTemplate>(DEFAULT_EMAIL_TEMPLATE);
+
+  // Editor Ref for WYSIWYG
+  const editorRef = useRef<HTMLDivElement>(null);
   
   // Manual Form State
   const [manualForm, setManualForm] = useState({
@@ -117,18 +119,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     }
   }, [msConfig.clientId, msConfig.tenantId]);
 
-  // Load Categories from DB
-  const loadCategories = async () => {
+  // Load Categories & Email Template from DB
+  const loadInitialData = async () => {
+    // 1. Categories
     const cats = await fetchCategories();
     if (cats.length > 0) {
       setGuestCategories(cats);
     } else {
       setGuestCategories(DEFAULT_GUEST_CATEGORIES);
     }
+
+    // 2. Email Template
+    try {
+      const template = await fetchEmailTemplate();
+      if (template) {
+        setEmailTemplate(template);
+      }
+    } catch (e) {
+      console.error("Failed to load email template", e);
+    }
   };
 
   useEffect(() => {
-    loadCategories();
+    loadInitialData();
   }, []);
 
   useEffect(() => {
@@ -142,6 +155,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     };
     fetchInsights();
   }, [guests]);
+
+  // --- Rich Text Editor Initialization ---
+  useEffect(() => {
+    if (settingsTab === 'TEMPLATE' && editorRef.current) {
+        // Initialize editor content when tab opens
+        // Check if content is different to avoid cursor jumping if we were editing
+        if (editorRef.current.innerHTML !== emailTemplate.body) {
+            editorRef.current.innerHTML = emailTemplate.body;
+        }
+    }
+  }, [settingsTab, emailTemplate.body]); 
+  // Dependency on emailTemplate.body might be tricky with contentEditable loops, 
+  // but since we only update state onBlur or save, it's safer. 
+  // However, for the initial load, it's crucial.
+
+  const execCmd = (cmd: string, val?: string) => {
+    document.execCommand(cmd, false, val);
+    if (editorRef.current) {
+        // Update state immediately for preview responsiveness
+        setEmailTemplate(prev => ({ ...prev, body: editorRef.current!.innerHTML }));
+        editorRef.current.focus();
+    }
+  };
 
   // --- Statistics & Chart Data Calculations ---
   
@@ -236,9 +272,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     await supabase.auth.signOut();
   };
 
-  const saveTemplate = () => {
-    localStorage.setItem('velana_email_template', JSON.stringify(emailTemplate));
-    setNotification({ type: 'success', message: 'Email template saved successfully.' });
+  const saveTemplate = async () => {
+    setIsSavingTemplate(true);
+    try {
+      await saveEmailTemplateToDb(emailTemplate);
+      setNotification({ type: 'success', message: 'Email template saved to database.' });
+    } catch (e) {
+      console.error(e);
+      setNotification({ type: 'error', message: 'Failed to save email template.' });
+    } finally {
+      setIsSavingTemplate(false);
+    }
   };
 
   const saveMsConfig = () => {
@@ -306,7 +350,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
       try {
          await createCategory(newCategory.trim());
          setNewCategory('');
-         await loadCategories();
+         const cats = await fetchCategories();
+         setGuestCategories(cats.length ? cats : DEFAULT_GUEST_CATEGORIES);
          setNotification({ type: 'success', message: 'Category added to database.' });
       } catch (e: any) {
          console.error(e);
@@ -323,7 +368,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     if (confirm(`Delete category "${cat}" from database?`)) {
       try {
         await deleteCategory(cat);
-        await loadCategories();
+        const cats = await fetchCategories();
+        setGuestCategories(cats.length ? cats : DEFAULT_GUEST_CATEGORIES);
         setNotification({ type: 'success', message: 'Category removed.' });
       } catch (e: any) {
         console.error(e);
@@ -336,7 +382,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
     if (confirm("Populate database with default system categories? Existing custom categories will remain.")) {
        try {
           await seedCategories();
-          await loadCategories();
+          const cats = await fetchCategories();
+          setGuestCategories(cats.length ? cats : DEFAULT_GUEST_CATEGORIES);
           setNotification({ type: 'success', message: 'Default categories seeded.' });
        } catch (e: any) {
           console.error(e);
@@ -621,9 +668,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                           <p className="font-serif text-lg font-bold">{emailTemplate.subject}</p>
                        </div>
                        <hr className="border-zinc-100" />
-                       <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
-                          {previewBody}
-                       </div>
+                       <div 
+                         className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 email-body-content"
+                         dangerouslySetInnerHTML={{ __html: previewBody }}
+                       />
                        <div className="flex justify-center pt-4">
                           <button disabled className="bg-yellow-600 text-black font-bold px-6 py-3 rounded-md uppercase text-xs tracking-widest opacity-80 cursor-not-allowed">
                              RSVP
@@ -753,16 +801,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ guests: initialGuests, 
                   <div>
                     <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Message Body</label>
                     <div className="text-[10px] text-zinc-500 mb-2">Available variables: {'{name}'}, {'{organization}'}</div>
-                    <textarea 
-                      rows={6}
-                      className="w-full bg-zinc-800 border border-zinc-700 p-3 rounded-lg text-white focus:border-yellow-500 outline-none" 
-                      value={emailTemplate.body} 
-                      onChange={e => setEmailTemplate({...emailTemplate, body: e.target.value})} 
-                    />
+                    
+                    <div className="border border-zinc-700 rounded-lg overflow-hidden bg-zinc-800">
+                        {/* Formatting Toolbar */}
+                        <div className="flex items-center gap-1 p-2 border-b border-zinc-700 bg-zinc-900/50">
+                            <button onClick={() => execCmd('bold')} className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white transition-colors" title="Bold"><Bold size={16}/></button>
+                            <button onClick={() => execCmd('italic')} className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white transition-colors" title="Italic"><Italic size={16}/></button>
+                            <button onClick={() => execCmd('underline')} className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white transition-colors" title="Underline"><Underline size={16}/></button>
+                            <div className="w-px bg-zinc-700 mx-1 h-4"></div>
+                            <button onClick={() => execCmd('formatBlock', 'P')} className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white transition-colors" title="Paragraph"><Type size={16}/></button>
+                            <button onClick={() => execCmd('insertUnorderedList')} className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white transition-colors" title="List"><List size={16}/></button>
+                            <div className="w-px bg-zinc-700 mx-1 h-4"></div>
+                        </div>
+
+                        {/* WYSIWYG Editor Area */}
+                        <div 
+                            ref={editorRef}
+                            contentEditable
+                            suppressContentEditableWarning
+                            className="p-4 min-h-[200px] outline-none text-sm font-sans text-white leading-relaxed focus:bg-zinc-800/80 transition-colors"
+                            onInput={(e) => setEmailTemplate({ ...emailTemplate, body: e.currentTarget.innerHTML })}
+                            style={{ whiteSpace: 'pre-wrap' }}
+                        />
+                    </div>
                   </div>
                   <div className="flex justify-end pt-4">
-                     <button onClick={saveTemplate} className="bg-yellow-600 text-black font-bold px-6 py-2 rounded-lg hover:bg-yellow-500 transition-colors">
-                       Save Changes
+                     <button onClick={saveTemplate} disabled={isSavingTemplate} className="bg-yellow-600 text-black font-bold px-6 py-2 rounded-lg hover:bg-yellow-500 transition-colors flex items-center gap-2">
+                       {isSavingTemplate ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Save Changes
                      </button>
                   </div>
                 </div>

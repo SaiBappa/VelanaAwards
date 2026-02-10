@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { Guest } from '../types';
+import { Guest, EmailTemplate } from '../types';
 import { DEFAULT_GUEST_CATEGORIES } from '../constants';
 
 // Map database snake_case columns to TypeScript camelCase properties
@@ -204,4 +204,45 @@ export const seedCategories = async (): Promise<void> => {
     .upsert(payload, { onConflict: 'name', ignoreDuplicates: true });
 
   if (error) throw error;
+};
+
+// --- Email Configuration (Explicit Table) ---
+
+export const saveEmailTemplate = async (template: EmailTemplate): Promise<void> => {
+  const { error } = await supabase
+    .from('email_settings')
+    .upsert({ 
+      id: 1, // Force single row
+      subject: template.subject,
+      banner_url: template.imageUrl,
+      message_body: template.body,
+      updated_at: new Date().toISOString()
+    });
+
+  if (error) {
+    console.error('Error saving email settings:', error);
+    throw error;
+  }
+};
+
+export const fetchEmailTemplate = async (): Promise<EmailTemplate | null> => {
+  const { data, error } = await supabase
+    .from('email_settings')
+    .select('subject, banner_url, message_body')
+    .eq('id', 1)
+    .single();
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.warn('Error fetching email settings:', error.message);
+    }
+    return null;
+  }
+
+  // Map DB columns to Frontend type
+  return {
+    subject: data.subject,
+    imageUrl: data.banner_url,
+    body: data.message_body
+  };
 };

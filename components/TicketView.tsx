@@ -1,10 +1,9 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Guest } from '../types';
 import { EVENT_DETAILS } from '../constants';
-import { generatePersonalizedGreeting } from '../services/geminiService';
-import { Download, Calendar, MapPin, Clock, Share2, Loader2 } from 'lucide-react';
+import { Download, Calendar, MapPin, Clock, Loader2 } from 'lucide-react';
 import * as htmlToImage from 'html-to-image';
 
 interface TicketViewProps {
@@ -12,24 +11,8 @@ interface TicketViewProps {
 }
 
 const TicketView: React.FC<TicketViewProps> = ({ guest }) => {
-  const [greeting, setGreeting] = useState<string>('');
-  const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const ticketRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const fetchGreeting = async () => {
-      try {
-        const msg = await generatePersonalizedGreeting(guest);
-        setGreeting(msg);
-      } catch (e) {
-        setGreeting("We are delighted to welcome you to the Velana Awards 2026.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchGreeting();
-  }, [guest]);
 
   const handleDownload = async () => {
     if (!ticketRef.current) return;
@@ -99,11 +82,7 @@ const TicketView: React.FC<TicketViewProps> = ({ guest }) => {
           </div>
 
           <div className="pt-4 italic text-zinc-600 text-sm border-t border-zinc-100 px-4">
-            {loading ? (
-              <div className="animate-pulse h-4 bg-zinc-100 rounded w-3/4 mx-auto"></div>
-            ) : (
-              `"${greeting}"`
-            )}
+            Velana Awards 2026
           </div>
 
           <div className="text-[10px] text-zinc-300 font-mono uppercase pt-2">
